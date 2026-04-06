@@ -328,7 +328,8 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
 
     const planNextAction = () => {
       if (showPopover || isDraggingRef.current || isAnimating) return;
-      if (gracefulExitRef.current) return;
+      // Clear stale exit flag so idle characters don't stay blocked
+      if (gracefulExitRef.current) gracefulExitRef.current = false;
       if (isPaused) {
         timeoutId = setTimeout(planNextAction, PAUSED_CHECK_INTERVAL);
         return;
@@ -381,7 +382,7 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
     }
 
     return () => { if (timeoutId) clearTimeout(timeoutId); };
-  }, [showPopover, isPaused, name, isReady, taskbarInfo.dockTopY, taskbarInfo.dockWidth, cfg.walkProb]);
+  }, [showPopover, isPaused, isAnimating, name, isReady, taskbarInfo.dockTopY, taskbarInfo.dockWidth, cfg.walkProb]);
 
   // ── Cancel animation on layout change ──
   useEffect(() => {
