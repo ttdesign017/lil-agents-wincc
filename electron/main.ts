@@ -1,6 +1,11 @@
 import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage } from 'electron';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { setupClaudeSession } from './ClaudeSession';
+
+// ESM __dirname equivalent
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Enable hardware acceleration for performance (GPU will handle transparency and blurs)
 // Only disable if transparency issues occur on specific drivers.
@@ -76,7 +81,7 @@ function createWindow() {
     skipTaskbar: true,
     hasShadow: false,
     resizable: false,
-    type: 'toolbar', // Helps with stay-on-top behavior
+    type: 'toolbar',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -84,14 +89,13 @@ function createWindow() {
     },
   });
 
-  // Set 'screen-saver' level to ensure it stays above almost everything else (Taskbar included)
   mainWindow.setAlwaysOnTop(true, 'screen-saver');
-  
-  // High visibility across virtual desktops
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
-  // Make the window ignore mouse events by default so users can click the desktop normally
+  // Enable click-through by default
   mainWindow.setIgnoreMouseEvents(true, { forward: true });
+  // Ensure pointer events are forwarded through the transparent area
+  mainWindow.setHasShadow(false);
 
   // Load the UI
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -125,6 +129,14 @@ app.whenReady().then(() => {
     setupClaudeSession(mainWindow);
   }
 
+  // #12: Listen for display change event after app is ready
+  screen.on('display-metrics-changed', (_event, _display, _changedMetrics) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      // Re-fetch primary display info and notify renderer
+      mainWindow.webContents.send('display-metrics-changed');
+    }
+  });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -147,25 +159,15 @@ ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
   }
 });
 
-// Calculate Taskbar position - basic implementation
+// Taskbar position for primary display
 ipcMain.handle('get-taskbar-info', () => {
-  // We will get the primary display work area vs full bounds to figure out Taskbar size
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const workArea = primaryDisplay.workArea;
-  const bounds = primaryDisplay.bounds;
+  const display = screen.getPrimaryDisplay();
+  const workArea = display.workArea;
+  const bounds = display.bounds;
 
-  // Taskbar is on bottom if workArea height < bounds height and workArea y == bounds y
-  let position = 'bottom';
-  let height = bounds.height - workArea.height;
-  let dockTopY = bounds.height - height; // The Y coordinate where the taskbar top is
-
+  let dockTopY = bounds.height - (bounds.height - workArea.height);
   if (workArea.y > bounds.y) {
-    position = 'top';
     dockTopY = workArea.y;
-  } else if (workArea.x > bounds.x) {
-    position = 'left'; 
-  } else if (workArea.width < bounds.width) {
-    position = 'right';
   }
 
   return {

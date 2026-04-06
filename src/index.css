@@ -7,10 +7,18 @@
 html, body, #root {
   width: 100%;
   height: 100%;
-  overflow: hidden;
   background-color: transparent !important;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color: var(--text-color, #ccd0d6);
+}
+
+/* Allow scrolling only on the debug page */
+.dbg, #root:has(.dbg) {
+  overflow: auto !important;
+}
+
+#root:not(:has(.dbg)) {
+  overflow: hidden;
 }
 
 /* Theme Design System */
@@ -146,4 +154,527 @@ kbd {
 .markdown-container a {
   color: var(--link-color);
   text-decoration: underline;
+}
+
+/* ─────────────────────────────────────────
+   Art Debugger Styles
+   ───────────────────────────────────────── */
+
+.dbg {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 24px;
+  background: #131318;
+  color: #ccd0d6;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ── Stage ── */
+.dbg-stage {
+  position: relative;
+  width: 100%;
+  height: 150px;
+  background: #1a1a2e;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.dbg-walker {
+  position: absolute;
+  transition: none;
+}
+
+.dbg-ground {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: rgba(255,255,255,0.15);
+}
+
+.dbg-stage-info {
+  text-align: center;
+  font-size: 13px;
+  color: #999;
+  margin-bottom: 20px;
+}
+
+.dbg-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 28px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dbg-header h1 {
+  font-size: 22px;
+  font-weight: 600;
+  color: #56b6c2;
+  margin: 0;
+}
+
+.dbg-close-btn {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ccc;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 8px 18px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.dbg-close-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.dbg-section {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.dbg-section h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #56b6c2;
+  margin: 0 0 14px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 8px;
+}
+
+.dbg-section h3 {
+  font-size: 14px;
+  font-weight: 500;
+  color: #abb2bf;
+  margin: 0 0 8px 0;
+}
+
+/* Table */
+.dbg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.dbg-table th {
+  text-align: left;
+  color: #999;
+  font-weight: 500;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.dbg-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.dbg-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  color: #7ee787;
+}
+
+/* Spritesheet with guides */
+.dbg-sheets {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.dbg-sheet-wrap {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.dbg-sheet-container {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
+.dbg-sheet-img {
+  max-width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  display: block;
+}
+
+.dbg-guide-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(255, 87, 87, 0.6);
+  pointer-events: none;
+}
+
+.dbg-sheet-meta {
+  display: block;
+  font-size: 11px;
+  color: #999;
+  margin-top: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Frame grid */
+.dbg-grid-group + .dbg-grid-group {
+  margin-top: 14px;
+}
+
+.dbg-frame-grid {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.dbg-frame-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.dbg-frame-cell > div {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.dbg-frame-label {
+  font-size: 11px;
+  color: #999;
+}
+
+/* Animation preview */
+.dbg-anim-row {
+  display: flex;
+  gap: 32px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dbg-anim-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 120px;
+}
+
+.dbg-anim-cell > span:first-child {
+  font-size: 13px;
+  color: #abb2bf;
+}
+
+.dbg-anim-sprite {
+  background-repeat: no-repeat;
+  background-position: 0 0;
+}
+
+.dbg-speed-label {
+  font-size: 11px;
+  color: #999;
+}
+
+/* Controls panel */
+.dbg-ctrls {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.dbg-slider-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #abb2bf;
+}
+
+.dbg-slider-group small {
+  color: #666;
+  font-size: 11px;
+}
+
+.dbg-slider-group input[type="range"] {
+  width: 100%;
+  max-width: 400px;
+  accent-color: #56b6c2;
+}
+
+.dbg-btn-submit {
+  background: rgba(86, 182, 194, 0.15);
+  color: #56b6c2;
+  border: 1px solid #56b6c2;
+  padding: 10px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s;
+  align-self: flex-start;
+}
+
+.dbg-btn-submit:hover {
+  background: rgba(86, 182, 194, 0.25);
+}
+
+.dbg-btn-submit.applied {
+  background: rgba(136, 231, 135, 0.2);
+  border-color: #88e787;
+  color: #88e787;
+}
+
+/* Code block */
+.dbg-code {
+  background: rgba(0, 0, 0, 0.35);
+  color: #7ee787;
+  padding: 14px;
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ── Frame strip (8 cut frames) ── */
+.dbg-strip-group h3 {
+  font-size: 13px;
+  font-weight: 500;
+  color: #abb2bf;
+  margin: 0 0 6px 0;
+}
+
+.dbg-strip-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.dbg-strip-cell {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  background-repeat: no-repeat;
+}
+
+.dbg-strip-label {
+  display: block;
+  font-size: 11px;
+  color: #666;
+  margin-top: 4px;
+}
+
+/* ── Per-character control panel ── */
+.dbg-char-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 800px) {
+  .dbg-char-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dbg-char-ctrl {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dbg-char-ctrl.ctrl-bruce {
+  border-top: 2px solid #56b6c2;
+}
+
+.dbg-char-ctrl.ctrl-jazz {
+  border-top: 2px solid #e67e22;
+}
+
+.dbg-char-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.dbg-char-header h2 {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0;
+  font-size: 15px;
+  color: #56b6c2;
+}
+
+.dbg-char-ctrl:nth-child(2) .dbg-char-header h2 {
+  color: #e67e22;
+}
+
+.dbg-walk-btn {
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dbg-walk-btn.walk {
+  color: #88e787;
+  border-color: #88e787;
+  background: rgba(136, 231, 135, 0.1);
+}
+
+.dbg-walk-btn.walk:hover {
+  background: rgba(136, 231, 135, 0.2);
+}
+
+.dbg-walk-btn.stop {
+  color: #e06c75;
+  border-color: #e06c75;
+  background: rgba(224, 108, 117, 0.1);
+}
+
+.dbg-walk-btn.stop:hover {
+  background: rgba(224, 108, 117, 0.2);
+}
+
+.dbg-char-info {
+  font-size: 12px;
+  color: #999;
+  margin-top: 8px;
+}
+
+/* ── Apply section ── */
+.dbg-apply-desc {
+  font-size: 13px;
+  color: #999;
+  margin-bottom: 12px;
+}
+
+.dbg-patch-preview {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dbg-patch-preview code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  color: #7ee787;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ── Modal ── */
+.dbg-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dbg-modal {
+  background: #1e1e26;
+  color: #ccd0d6;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 600px;
+  width: 90%;
+}
+
+.dbg-modal h3 {
+  font-size: 16px;
+  color: #56b6c2;
+  margin: 0 0 8px 0;
+}
+
+.dbg-modal-desc {
+  font-size: 13px;
+  color: #999;
+  margin: 0 0 12px 0;
+}
+
+.dbg-modal code {
+  color: #7ee787;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.dbg-modal-code {
+  background: rgba(0, 0, 0, 0.4);
+  color: #7ee787;
+  padding: 12px;
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.dbg-modal-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.dbg-copy-btn {
+  background: rgba(86, 182, 194, 0.15);
+  color: #56b6c2;
+  border: 1px solid #56b6c2;
+  padding: 8px 18px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+
+.dbg-copy-btn:hover {
+  background: rgba(86, 182, 194, 0.25);
+}
+
+.dbg-btn-cancel {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ccc;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.dbg-btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.14);
 }

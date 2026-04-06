@@ -6,14 +6,41 @@ import fs from 'fs';
 interface ClaudeState {
   process: ChildProcessWithoutNullStreams;
   lineBuffer: string;
+  startedAt: number;
 }
 
+const MAX_SESSIONS = 2;
 const sessions = new Map<string, ClaudeState>();
 
 // Resolve the claude CLI path directly to bypass PowerShell wrapper issues
 function getClaudeCliPath(): string {
   const appData = process.env.APPDATA || '';
-  return path.join(appData, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+  const globalPath = path.join(appData, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+  // Fallback: try npx resolution if global install not found
+  if (!fs.existsSync(globalPath)) return 'cli.js';
+  return globalPath;
+}
+
+// Find template CLAUDE.md with multiple fallback locations
+function findTemplateClaudeMd(sessionId: string): string | null {
+  const candidates: string[] = [];
+
+  // 1. Packaged app resources
+  if (app.isPackaged) {
+    candidates.push(path.join(process.resourcesPath, 'personas', sessionId, 'CLAUDE.md'));
+  }
+
+  // 2. Development working directory
+  candidates.push(path.join(process.cwd(), 'personas', sessionId, 'CLAUDE.md'));
+
+  // 3. App installation path relative
+  const appPath = app.getAppPath();
+  candidates.push(path.join(appPath, 'personas', sessionId, 'CLAUDE.md'));
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
 }
 
 function processLine(line: string, mainWindow: Electron.BrowserWindow, sessionId: string) {
@@ -47,22 +74,44 @@ export function setupClaudeSession(mainWindow: Electron.BrowserWindow) {
   function startSession(sessionId: string) {
     if (sessions.has(sessionId)) return;
 
-    // Use AppData (userData) instead of projectRoot/personas for persistence in packaged apps
-    // Use local personas folder relative to the app's root directory or resources folder
-    const personaRoot = app.isPackaged ? process.resourcesPath : process.cwd();
-    const personaDir = path.join(personaRoot, 'personas', sessionId);
-    
+    // Enforce session limit: kill oldest if we exceed MAX_SESSIONS
+    if (sessions.size >= MAX_SESSIONS) {
+      let oldestId = '';
+      let oldestTime = Infinity;
+      for (const [id, state] of sessions) {
+        if (state.startedAt < oldestTime) {
+          oldestTime = state.startedAt;
+          oldestId = id;
+        }
+      }
+      if (oldestId) {
+        console.warn(`[ClaudeSession] Max sessions (${MAX_SESSIONS}) exceeded, killing oldest session: ${oldestId}`);
+        const oldestState = sessions.get(oldestId);
+        if (oldestState) {
+          oldestState.process.kill();
+          sessions.delete(oldestId);
+        }
+      }
+    }
+
+    // Use AppData (userData) for session persistence, cwd for templates in dev
+    const userDataDir = app.getPath('userData');
+    const personaDir = path.join(userDataDir, 'personas', sessionId);
+
     if (!fs.existsSync(personaDir)) {
       fs.mkdirSync(personaDir, { recursive: true });
     }
 
-    // Try to copy template CLAUDE.md from the bundled app to userData if it doesn't exist
+    // Copy template CLAUDE.md if it doesn't exist yet
     const targetClaudeMd = path.join(personaDir, 'CLAUDE.md');
     if (!fs.existsSync(targetClaudeMd)) {
-      const templatePath = path.join(app.getAppPath(), 'personas', sessionId, 'CLAUDE.md');
-      if (fs.existsSync(templatePath)) {
+      const templatePath = findTemplateClaudeMd(sessionId);
+      if (templatePath) {
         try {
-          fs.copyFileSync(templatePath, targetClaudeMd);
+          // Atomic write: write to tmp then rename to avoid partial reads
+          const tmpPath = targetClaudeMd + '.tmp';
+          fs.copyFileSync(templatePath, tmpPath);
+          fs.renameSync(tmpPath, targetClaudeMd);
         } catch (e) {
           console.error(`Failed to copy template for ${sessionId}:`, e);
         }
@@ -78,10 +127,15 @@ export function setupClaudeSession(mainWindow: Electron.BrowserWindow) {
       '--dangerously-skip-permissions'
     ], {
       cwd: personaDir,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+      env: {
+        ...process.env,
+        FORCE_COLOR: '0',
+        NO_COLOR: '1',
+        CLAUDE_CODE_DISABLE_CONTEXT_MANAGEMENT: '1',
+      },
     });
 
-    sessions.set(sessionId, { process: currentSession, lineBuffer: '' });
+    sessions.set(sessionId, { process: currentSession, lineBuffer: '', startedAt: Date.now() });
 
     currentSession.stdout.on('data', (data: Buffer) => {
       const state = sessions.get(sessionId);

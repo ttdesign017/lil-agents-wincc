@@ -1,12 +1,33 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import TerminalPopover from './TerminalPopover';
-
-// Character Constants based on 1024x164 image (8 frames of 128x164)
-const FRAME_WIDTH = 128;
-const FRAME_HEIGHT = 164;
-const SCALE = 0.6;
-const DISPLAY_WIDTH = FRAME_WIDTH * SCALE;
-const DISPLAY_HEIGHT = FRAME_HEIGHT * SCALE;
+import { useClaudeSession } from '../hooks/useClaudeSession';
+import {
+  CHAR_CONFIGS,
+  CharSpriteConfig,
+  BASE_STEP,
+  FRAME_DURATION_MS,
+  PROGRESS_MIN,
+  PROGRESS_MAX,
+  SAFE_BOUNDARY_MIN,
+  SAFE_BOUNDARY_MAX,
+  IDLE_BOUNDARY_MIN,
+  IDLE_BOUNDARY_MAX,
+  TARGET_PROXIMITY,
+  LOOP_FRAMES_MIN,
+  LOOP_FRAMES_MAX,
+  PAUSED_CHECK_INTERVAL,
+  EDGE_FLIP_DELAY_MIN,
+  EDGE_FLIP_DELAY_MAX,
+  IDLE_WAIT_MIN,
+  IDLE_WAIT_MAX,
+  POPOVER_TRACK_INTERVAL,
+  TOOLTIP_DISPLAY_MS,
+  WALK_DIST_MIN_FRAC,
+  WALK_DIST_MAX_FRAC,
+  WALK_DIST_THRESHOLD,
+  Phase,
+} from '../config';
 
 interface TaskbarInfo {
   dockX: number;
@@ -19,418 +40,457 @@ interface WalkerProps {
   name: string;
   sprite: string;
   taskbarInfo: TaskbarInfo;
-  positionProgress: number;
+  initialProgress: number;
   yOffset: number;
   visible?: boolean;
 }
 
-interface Message {
-  type: 'output' | 'error' | 'user' | 'thinking';
-  text: string;
-}
-
 const WalkerCharacter: React.FC<WalkerProps> = ({
-  name, sprite, taskbarInfo, positionProgress, yOffset, visible
+  name, sprite, taskbarInfo, initialProgress, yOffset, visible,
 }) => {
-  const progressRef = useRef(positionProgress);
-  const containerRef = useRef<HTMLDivElement>(null);
-  
-  const [goingRight, setGoingRight] = useState(true);
-  const [isWalking, setIsWalking] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [showPopover, setShowPopover] = useState(false);
+  const {
+    chatHistory, isThinking, hasUnread, popoverRef, setHasUnread, setIsThinking,
+    handleSubmitMessage, handleClearHistory,
+  } = useClaudeSession(name);
 
-  // Persistent interaction states
-  const [chatHistory, setChatHistory] = useState<Message[]>([
-    { type: 'output', text: `Hi, I'm ${name}. Ask me anything!` }
-  ]);
+  const cfg = CHAR_CONFIGS[name];
+  if (!cfg) throw new Error(`No sprite config for character "${name}"`);
+  const effectiveYOffset = yOffset + (cfg.yOffset ?? 0);
+
+  const progressRef = useRef(initialProgress);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const [goingRight, setGoingRight] = useState(true);
+  const goingRightRef = useRef(true);
+  useEffect(() => { goingRightRef.current = goingRight; }, [goingRight]);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const gracefulExitRef = useRef(false);
+  const [showPopover, setShowPopover] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
-  const [isThinking, setIsThinking] = useState(false);
-  const [hasUnread, setHasUnread] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  const isDraggingRef = useRef(false);
+  const imageReadyRef = useRef(false);
+  const [dragPositionState, setDragPositionState] = useState<number | null>(null);
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [popoverX, setPopoverX] = useState(0);
+  const [popoverY, setPopoverY] = useState(0);
+
+  // Animation state
+  const rafRef = useRef(0);
+  const animPhaseRef = useRef<Phase>('idle');
+  const animFrameRef = useRef(0);
+  const lastAnimTimeRef = useRef(0);
+  const loopCountTargetRef = useRef(0);
+  const loopCountDoneRef = useRef(0);
+  const walkStartP = useRef(0);
+  const walkEndP = useRef(0);
 
   const dragState = useRef({ startX: 0, startProgress: 0, hasDragged: false });
-  const isDraggingRef = useRef(false);
-  useEffect(() => { isDraggingRef.current = isDragging; }, [isDragging]);
-
-  // Need a ref for showPopover to use inside IPC callbacks safely
-  const popoverRef = useRef(showPopover);
-  useEffect(() => { popoverRef.current = showPopover; }, [showPopover]);
-
-  // Efficient Direct DOM update helper
-  const updateDOMPosition = useCallback(() => {
-    if (containerRef.current) {
-      const x = progressRef.current * (taskbarInfo.dockWidth || 1920);
-      const y = Math.max(0, taskbarInfo.dockTopY - DISPLAY_HEIGHT + yOffset);
-      // Use translate3d for GPU acceleration and zero React re-renders for movement
-      containerRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-    }
-  }, [taskbarInfo.dockWidth, taskbarInfo.dockTopY, yOffset]);
-
-  // Initialize position and handle resize
-  useEffect(() => {
-    updateDOMPosition();
-  }, [updateDOMPosition]);
-
-  // Global IPC Listeners for Claude
-  useEffect(() => {
-    if (!(window as any).electronAPI) return;
-
-    // Start session if not started
-    (window as any).electronAPI.startClaude(name);
-
-    const offData = (window as any).electronAPI.onClaudeData(name, (data: string) => {
-      setChatHistory(prev => {
-        let updated = [...prev];
-        if (updated.length > 0 && updated[updated.length - 1].type === 'output') {
-          const lastMsg = updated[updated.length - 1];
-          updated[updated.length - 1] = {
-            ...lastMsg,
-            text: lastMsg.text + (lastMsg.text ? '\n' : '') + data
-          };
-        } else {
-          updated.push({ type: 'output', text: data });
-        }
-        if (updated.length > 200) updated = updated.slice(-200);
-        return updated;
-      });
-    });
-
-    const offError = (window as any).electronAPI.onClaudeError(name, (data: string) => {
-      setChatHistory(prev => [...prev, { type: 'error', text: data }]);
-    });
-
-    const offExit = (window as any).electronAPI.onClaudeExit(name, (code: number) => {
-      setIsThinking(v => {
-        if (v) {
-          if (code !== 0) setChatHistory(prev => [...prev, { type: 'error', text: `[Session ended, code ${code}]` }]);
-          return false;
-        }
-        return v;
-      });
-    });
-
-    const offTurnComplete = (window as any).electronAPI.onClaudeTurnComplete?.(name, () => {
-      setIsThinking(v => {
-        if (v) {
-          if (!popoverRef.current) setHasUnread(true);
-          return false;
-        }
-        return v;
-      });
-    });
-
-    return () => {
-      offData(); offError(); offExit(); offTurnComplete?.();
-    };
-  }, []);
-
-  const handleSubmitMessage = useCallback((text: string) => {
-    setChatHistory(prev => [...prev, { type: 'user', text }]);
-    setIsThinking(true);
-    setHasUnread(false);
-    
-    if ((window as any).electronAPI) {
-      (window as any).electronAPI.sendClaudeInput(name, text);
-    }
-  }, []);
-
-  const handleClearHistory = useCallback(() => {
-    setChatHistory([{ type: 'output', text: `History cleared!` }]);
-  }, []);
-
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const readyTimeRef = useRef(0);
 
-  const handleMouseEnter = () => {
-    if (isDraggingRef.current) return;
-    syncLogicalPosition(); // Capture current spot
-    setIsPaused(true);
-    setShowTooltip(true);
-    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
-    tooltipTimerRef.current = setTimeout(() => setShowTooltip(false), 800);
+  // ── Centralized mouse-ignore state machine ──
+  const mouseOverCharacterRef = useRef(false);
+  const mouseOverPopoverRef = useRef(false);
+  const showPopoverRef = useRef(showPopover);
+
+  const updateMouseIgnore = useCallback(() => {
+    const shouldIgnore = !mouseOverCharacterRef.current && !mouseOverPopoverRef.current && !showPopoverRef.current;
     if ((window as any).electronAPI) {
-      (window as any).electronAPI.setIgnoreMouseEvents(false);
+      (window as any).electronAPI.setIgnoreMouseEvents(shouldIgnore, { forward: true });
     }
-  };
+  }, []);
 
-  const handleMouseLeave = () => {
-    if (isDraggingRef.current) return;
-    if (!showPopover) {
-      setIsPaused(false);
-    }
-    setShowTooltip(false);
-    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
-    if ((window as any).electronAPI && !showPopover) {
-      (window as any).electronAPI.setIgnoreMouseEvents(true, { forward: true });
-    }
-  };
+  const displayW = Math.round(cfg.frameWidth * cfg.scale);
+  const displayH = Math.round(cfg.frameHeight * cfg.scale);
 
+  // ── Load sprite image ──
+  useEffect(() => {
+    const img = new Image();
+    img.src = sprite;
+    img.onload = () => { imgRef.current = img; imageReadyRef.current = true; };
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [sprite]);
+
+  // ── Canvas frame renderer ──
+  const renderFrame = useCallback((frame: number) => {
+    if (!canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d');
+    if (!ctx || !imageReadyRef.current || !imgRef.current) return;
+    const col = frame % cfg.cols;
+    const row = Math.floor(frame / cfg.cols);
+    ctx.clearRect(0, 0, cfg.frameWidth, cfg.frameHeight);
+    ctx.imageSmoothingEnabled = false; // keep pixel-art crisp
+    ctx.drawImage(
+      imgRef.current,
+      col * cfg.frameWidth, row * cfg.frameHeight,
+      cfg.frameWidth, cfg.frameHeight,
+      0, 0, cfg.frameWidth, cfg.frameHeight,
+    );
+  }, [cfg.cols, cfg.frameWidth, cfg.frameHeight]);
+
+  // ── Position update (direct DOM transform, no CSS transition) ──
+  const updateDOMPosition = useCallback(() => {
+    if (!containerRef.current) return;
+    const x = progressRef.current * (taskbarInfo.dockWidth || 1920);
+    containerRef.current.style.transition = 'none';
+    containerRef.current.style.transform = `translate3d(${x}px, ${window.innerHeight - displayH + effectiveYOffset}px, 0)`;
+  }, [taskbarInfo.dockWidth, yOffset, displayH]);
+
+  useEffect(() => { updateDOMPosition(); }, [updateDOMPosition, taskbarInfo.dockWidth, taskbarInfo.dockTopY]);
+
+  // no-op removed — progressRef always tracks logical position
+
+  useEffect(() => { popoverRef.current = showPopover; }, [showPopover, popoverRef]);
+
+  useEffect(() => { showPopoverRef.current = showPopover; }, [showPopover]);
+
+  // ── rAF loop: frames + eased position ──
+  const animTick = useCallback((time: number) => {
+    if (lastAnimTimeRef.current === 0) lastAnimTimeRef.current = time;
+    const elapsed = time - lastAnimTimeRef.current;
+
+    const phase = animPhaseRef.current;
+    const direction = goingRightRef.current ? 1 : -1;
+    const baseStep = BASE_STEP / (taskbarInfo.dockWidth || 1920);
+
+    // Position always updates every rAF for smooth interpolation
+    if (!isDraggingRef.current && phase !== 'idle') {
+      const endFrames = cfg.endMax - cfg.endMin + 1;
+
+      if (phase === 'start') {
+        const t = (animFrameRef.current - cfg.startMin) / (cfg.startMax - cfg.startMin + 1);
+        const easeCoeff = t * t;
+        progressRef.current += baseStep * direction * easeCoeff * elapsed / FRAME_DURATION_MS;
+        progressRef.current = Math.max(PROGRESS_MIN, Math.min(PROGRESS_MAX, progressRef.current));
+      } else if (phase === 'loop') {
+        const newProgress = progressRef.current + baseStep * direction * elapsed / FRAME_DURATION_MS;
+
+        // Check if we've reached the walk target or screen edge
+        const nearTarget = (direction > 0 && newProgress >= walkEndP.current - TARGET_PROXIMITY)
+          || (direction < 0 && newProgress <= walkEndP.current + TARGET_PROXIMITY);
+        const nearEdge = newProgress <= PROGRESS_MIN || newProgress >= PROGRESS_MAX;
+
+        if (nearTarget || nearEdge) {
+          progressRef.current = Math.max(PROGRESS_MIN, Math.min(PROGRESS_MAX, newProgress));
+          walkEndP.current = progressRef.current;
+          loopCountTargetRef.current = 0;
+          loopCountDoneRef.current = 0;
+          animFrameRef.current = cfg.endMin;
+          animPhaseRef.current = 'end';
+          if (nearEdge) {
+            goingRightRef.current = !goingRightRef.current;
+            setGoingRight(goingRightRef.current);
+          }
+        } else {
+          progressRef.current = Math.max(PROGRESS_MIN, Math.min(PROGRESS_MAX, newProgress));
+        }
+      } else if (phase === 'end') {
+        // Quadratic ease-out deceleration: full speed at start, ramps to zero by endMax
+        const tEnd = Math.min(1, (animFrameRef.current - cfg.endMin) / (endFrames - 1));
+        const easeCoeff = (1 - tEnd) * (1 - tEnd);
+        progressRef.current += baseStep * direction * easeCoeff * elapsed / FRAME_DURATION_MS;
+        progressRef.current = Math.max(PROGRESS_MIN, Math.min(PROGRESS_MAX, progressRef.current));
+      }
+      updateDOMPosition();
+    }
+
+    // Sprite frame changes at fixed 50ms intervals
+    if (elapsed >= FRAME_DURATION_MS && !isDraggingRef.current) {
+      lastAnimTimeRef.current = time - (elapsed % FRAME_DURATION_MS);
+
+      if (phase === 'start') {
+        animFrameRef.current++;
+        if (animFrameRef.current > cfg.startMax) {
+          animFrameRef.current = cfg.loopMin;
+          animPhaseRef.current = 'loop';
+          loopCountDoneRef.current = 0;
+          walkStartP.current = progressRef.current;
+        }
+        renderFrame(animFrameRef.current);
+      } else if (phase === 'loop') {
+        animFrameRef.current++;
+        if (animFrameRef.current > cfg.loopMax) {
+          animFrameRef.current = cfg.loopMin;
+          loopCountDoneRef.current++;
+          if (loopCountDoneRef.current >= loopCountTargetRef.current) {
+            walkStartP.current = progressRef.current;
+            animFrameRef.current = cfg.endMin;
+            animPhaseRef.current = 'end';
+          }
+        }
+        renderFrame(animFrameRef.current);
+      } else if (phase === 'end') {
+        animFrameRef.current++;
+        const arrived = animFrameRef.current > cfg.endMax;
+        if (arrived) {
+          // position already reflects END phase movement; no snap-back needed
+          animPhaseRef.current = 'idle';
+          setIsAnimating(false);
+        } else {
+          renderFrame(animFrameRef.current);
+        }
+      }
+    }
+
+    rafRef.current = requestAnimationFrame(animTick);
+  }, [cfg, renderFrame, updateDOMPosition, taskbarInfo.dockWidth]);
+
+  // ── Start walk ──
+  const startWalk = useCallback(() => {
+    cancelAnimationFrame(rafRef.current);
+    gracefulExitRef.current = false;
+    animPhaseRef.current = 'start';
+    animFrameRef.current = cfg.startMin;
+    loopCountTargetRef.current = LOOP_FRAMES_MIN + Math.floor(Math.random() * (LOOP_FRAMES_MAX - LOOP_FRAMES_MIN + 1));
+    loopCountDoneRef.current = 0;
+    lastAnimTimeRef.current = 0;
+    renderFrame(animFrameRef.current);
+    rafRef.current = requestAnimationFrame(animTick);
+  }, [cfg, animTick, renderFrame]);
+
+  // ── Stop ──
+  const stopWalk = useCallback(() => {
+    cancelAnimationFrame(rafRef.current);
+    animPhaseRef.current = 'idle';
+  }, []);
+
+  // ── Graceful walk finish ──
+  const gracefulEndWalk = useCallback(() => {
+    if (animPhaseRef.current === 'idle') return;
+    gracefulExitRef.current = true;
+    if (animPhaseRef.current === 'start' || animPhaseRef.current === 'loop') {
+      walkStartP.current = progressRef.current;
+      // The END phase adds incremental deceleration; walkEndP is where we'll finally land
+      const endFrames = cfg.endMax - cfg.endMin + 1;
+      walkEndP.current = progressRef.current; // will stay put since decel starts here
+      loopCountTargetRef.current = 0;
+      loopCountDoneRef.current = 0;
+      animFrameRef.current = cfg.endMin;
+      animPhaseRef.current = 'end';
+    }
+  }, [cfg.endMin]);
+
+  // ── Sync isAnimating with animPhaseRef ──
+  useEffect(() => {
+    if (isAnimating && animPhaseRef.current === 'idle') {
+      startWalk();
+    } else if (!isAnimating && animPhaseRef.current !== 'idle' && !gracefulExitRef.current) {
+      stopWalk();
+    }
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [isAnimating, startWalk, stopWalk]);
+
+  // ── Track character screen position for popover ──
+  useEffect(() => {
+    if (!isPopoverOpen) return;
+    // Immediately sync position before first render of popover
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (rect) {
+      setPopoverX(Math.floor(rect.left + rect.width / 2));
+      setPopoverY(Math.floor(rect.top));
+    }
+    const update = () => {
+      const r = containerRef.current?.getBoundingClientRect();
+      if (r) {
+        setPopoverX(Math.floor(r.left + r.width / 2));
+        setPopoverY(Math.floor(r.top));
+      }
+    };
+    const id = setInterval(update, POPOVER_TRACK_INTERVAL);
+    return () => clearInterval(id);
+  }, [isPopoverOpen]);
+
+  // ── Personality / idle engine ──
+  useEffect(() => {
+    // Mark ready immediately if dock info is available
+    if (!taskbarInfo.dockWidth || !taskbarInfo.dockTopY) return;
+    setIsReady(true);
+
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const planNextAction = () => {
+      if (showPopover || isDraggingRef.current || isAnimating) return;
+      if (gracefulExitRef.current) return;
+      if (isPaused) {
+        timeoutId = setTimeout(planNextAction, PAUSED_CHECK_INTERVAL);
+        return;
+      }
+
+      const rand = Math.random();
+      if (rand < cfg.walkProb) {
+        initiateWalk();
+      } else {
+        timeoutId = setTimeout(planNextAction, IDLE_WAIT_MIN + Math.random() * (IDLE_WAIT_MAX - IDLE_WAIT_MIN));
+      }
+    };
+
+    const initiateWalk = () => {
+      const currentP = Math.max(IDLE_BOUNDARY_MIN, Math.min(IDLE_BOUNDARY_MAX, progressRef.current));
+      let direction = goingRightRef.current ? 1 : -1;
+      // Random destination: 10%~30% of screen width in current direction
+      const walkDist = WALK_DIST_MIN_FRAC + Math.random() * (WALK_DIST_MAX_FRAC - WALK_DIST_MIN_FRAC);
+      let targetP = currentP + direction * walkDist;
+
+      // If target would go beyond edge, flip direction
+      if (targetP < 0.02 || targetP > 0.98) {
+        direction = -direction;
+        targetP = currentP + direction * walkDist;
+        goingRightRef.current = direction === 1;
+        setGoingRight(goingRightRef.current);
+      }
+
+      // Final clamp; if still at edge (both directions blocked), don't walk
+      targetP = Math.max(IDLE_BOUNDARY_MIN, Math.min(IDLE_BOUNDARY_MAX, targetP));
+      if (Math.abs(targetP - currentP) < 0.01) {
+        // Nowhere to go — flip facing and wait
+        goingRightRef.current = !goingRightRef.current;
+        setGoingRight(goingRightRef.current);
+        const delay = EDGE_FLIP_DELAY_MIN + Math.random() * (EDGE_FLIP_DELAY_MAX - EDGE_FLIP_DELAY_MIN);
+        timeoutId = setTimeout(planNextAction, delay);
+        return;
+      }
+      walkStartP.current = currentP;
+      walkEndP.current = targetP;
+      setIsAnimating(true);
+    };
+
+    if (showPopover || isDraggingRef.current || isAnimating) {
+      // don't initiate — wait
+    } else if (isPaused) {
+      // paused — wait
+    } else {
+      planNextAction();
+    }
+
+    return () => { if (timeoutId) clearTimeout(timeoutId); };
+  }, [showPopover, isPaused, name, isReady, taskbarInfo.dockTopY, taskbarInfo.dockWidth, cfg.walkProb]);
+
+  // ── Cancel animation on layout change ──
+  useEffect(() => {
+    if (animPhaseRef.current !== 'idle' && !gracefulExitRef.current) {
+      gracefulExitRef.current = true;
+      walkStartP.current = progressRef.current;
+      walkEndP.current = progressRef.current;
+      loopCountTargetRef.current = 0;
+      loopCountDoneRef.current = 0;
+      animFrameRef.current = cfg.endMin;
+      animPhaseRef.current = 'end';
+    }
+  }, [taskbarInfo.dockWidth, taskbarInfo.dockTopY, cfg.endMin]);
+
+  // ── Drag ──
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
     e.preventDefault();
-    syncLogicalPosition(); // Capture current spot before drag starts
-    setIsDragging(true);
+    isDraggingRef.current = true;
     setIsPaused(true);
     dragState.current = { startX: e.clientX, startProgress: progressRef.current, hasDragged: false };
   };
 
   useEffect(() => {
-    const handlePointerMove = (e: PointerEvent) => {
-      if (!isDragging) return;
-      const deltaX = e.clientX - dragState.current.startX;
-      if (Math.abs(deltaX) > 3) {
-        dragState.current.hasDragged = true;
-      }
-      let newProgress = dragState.current.startProgress + deltaX / (taskbarInfo.dockWidth || 1);
-      if (isNaN(newProgress)) newProgress = progressRef.current;
-      newProgress = Math.max(0.01, Math.min(0.99, newProgress));
-      progressRef.current = newProgress;
-      updateDOMPosition(); // Zero re-render move during drag
+    const onMove = (e: PointerEvent) => {
+      if (!isDraggingRef.current) return;
+      const dx = e.clientX - dragState.current.startX;
+      if (Math.abs(dx) > 3) dragState.current.hasDragged = true;
+      let np = dragState.current.startProgress + dx / (taskbarInfo.dockWidth || 1);
+      np = Math.max(SAFE_BOUNDARY_MIN, Math.min(SAFE_BOUNDARY_MAX, isNaN(np) ? progressRef.current : np));
+      progressRef.current = np;
+      updateDOMPosition();
+      if (showPopover) setDragPositionState(np);
     };
 
-    const handlePointerUp = (e: PointerEvent) => {
-      if (!isDragging) return;
-      setIsDragging(false);
+    const onUp = (e: PointerEvent) => {
+      if (!isDraggingRef.current) return;
+      const wasDragging = dragState.current.hasDragged;
+      isDraggingRef.current = false;
+      setDragPositionState(null);
 
-      if (!dragState.current.hasDragged) {
-        handleCharacterClick();
-      } else {
-        if (!popoverRef.current) {
-          setIsPaused(false);
-          const rect = containerRef.current?.getBoundingClientRect();
-          if (rect && (window as any).electronAPI) {
-            const inside = e.clientX >= rect.left && e.clientX <= rect.right &&
-                           e.clientY >= rect.top && e.clientY <= rect.bottom;
-            if (!inside) {
-              (window as any).electronAPI.setIgnoreMouseEvents(true, { forward: true });
-            }
+      if (!wasDragging) {
+        handleClick();
+      } else if (!popoverRef.current) {
+        setIsPaused(false);
+        // After drag, check if pointer is over character element.
+        // Use the unscaled container rect (getBoundingClientRect already returns scaled rect).
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          const inside = e.clientX >= rect.left && e.clientX <= rect.right &&
+            e.clientY >= rect.top && e.clientY <= rect.bottom;
+          if (!inside) {
+            mouseOverCharacterRef.current = false;
+            updateMouseIgnore();
           }
         }
       }
     };
-
-    if (isDragging) {
-      window.addEventListener('pointermove', handlePointerMove);
-      window.addEventListener('pointerup', handlePointerUp);
-    }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
     return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
     };
-  }, [isDragging, taskbarInfo.dockWidth, updateDOMPosition]);
+  }, [taskbarInfo.dockWidth, updateDOMPosition, popoverRef, showPopover]);
 
-  const handleCharacterClick = () => {
-    syncLogicalPosition(); // Ensure goal is cancelled exactly here
-    setShowPopover(v => {
-      const nextState = !v;
-      if (nextState) {
-        setIsPaused(true);
-        setHasUnread(false);
-      } else {
-        setIsPaused(false);
-        if ((window as any).electronAPI) {
-          (window as any).electronAPI.setIgnoreMouseEvents(true, { forward: true });
-        }
+  const handleClick = () => {
+    if (!showPopover) {
+      setIsPaused(true);
+      setHasUnread(false);
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) {
+        setPopoverX(Math.floor(rect.left + rect.width / 2));
+        setPopoverY(Math.floor(rect.top));
       }
-      return nextState;
-    });
-  };
-
-  const [walkGoal, setWalkGoal] = useState<{ progress: number; duration: number } | null>(null);
-  const [isReady, setIsReady] = useState(false);
-
-  // Sync logical position (stops jumping)
-  const syncLogicalPosition = useCallback(() => {
-    if (containerRef.current) {
-      const style = window.getComputedStyle(containerRef.current);
-      const matrix = new DOMMatrixReadOnly(style.transform);
-      const currentX = matrix.m41; 
-      const width = taskbarInfo.dockWidth || window.innerWidth;
-      if (width > 0) {
-        progressRef.current = currentX / width;
-      }
-    }
-  }, [taskbarInfo.dockWidth]);
-
-  const readyTimeRef = useRef<number>(0);
-
-  // Optimized Personality Engine (V3.1 Enhanced Randomness)
-  useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout>;
-
-    const planNextAction = () => {
-      if (!taskbarInfo.dockWidth || !taskbarInfo.dockTopY) {
-        timeoutId = setTimeout(planNextAction, 500);
-        return;
-      }
-
-      if (!isReady) {
-        setIsReady(true);
-        readyTimeRef.current = Date.now();
-        timeoutId = setTimeout(planNextAction, 1000); // Wait 1s after flipping ready
-        return;
-      }
-
-      // Safeguard: Wait at least 1s after first appearances
-      if (Date.now() - readyTimeRef.current < 1000) {
-        timeoutId = setTimeout(planNextAction, 500);
-        return;
-      }
-
-      // Only plan if we are not already busy or walking
-      if (showPopover || isPaused || isDragging || walkGoal) {
-        return;
-      }
-
-      // Personality Weights
-      const isLvyoyo = name === '绿油油';
-      const rand = Math.random();
-
-      if (isLvyoyo) {
-        // Hyperactive: 85% Walk, 10% Glance, 5% Stay Still
-        if (rand < 0.1) {
-          // Glance
-          setGoingRight(prev => !prev);
-          timeoutId = setTimeout(planNextAction, 800 + Math.random() * 1200);
-        } else if (rand < 0.95) {
-          // Walk
-          initiateWalk();
-        } else {
-          // Stay Still (short rest)
-          setIsWalking(false);
-          setWalkGoal(null);
-          timeoutId = setTimeout(planNextAction, 1000 + Math.random() * 9000); // 1-10s
-        }
-      } else {
-        // Calm (刘小红): 45% Walk, 55% Stay Still (Still No Glance)
-        if (rand < 0.45) {
-          initiateWalk();
-        } else {
-          // Stay Still (moderate rest)
-          setIsWalking(false);
-          setWalkGoal(null);
-          // 8s to 40s
-          timeoutId = setTimeout(planNextAction, 8000 + Math.random() * 32000);
-        }
-      }
-    };
-
-    const initiateWalk = () => {
-      const currentP = progressRef.current;
-      let targetP;
-      
-      const isLongWalk = Math.random() < 0.3;
-      // Minimum distance check to prevent marching in place
-      const walkDistance = isLongWalk ? (0.2 + Math.random() * 0.4) : (0.08 + Math.random() * 0.12);
-
-      if (currentP > 0.8) targetP = currentP - walkDistance;
-      else if (currentP < 0.2) targetP = currentP + walkDistance;
-      else targetP = Math.random() < 0.5 ? currentP + walkDistance : currentP - walkDistance;
-
-      // Ensure targetP is valid and not exactly currentP
-      targetP = Math.max(0.05, Math.min(0.95, targetP));
-      if (Math.abs(targetP - currentP) < 0.04) {
-        // If too close, try opposite direction
-        targetP = currentP > 0.5 ? currentP - 0.15 : currentP + 0.15;
-      }
-
-      setGoingRight(targetP > currentP);
-
-      const baseSpeed = 0.0125;
-      const speedVar = 0.8 + Math.random() * 0.4; 
-      const duration = (Math.abs(targetP - currentP) / (baseSpeed * speedVar)) * 1000; 
-
-      setIsWalking(true);
-      setWalkGoal({ progress: targetP, duration });
-    };
-
-    if (!showPopover && !isPaused && !isDragging && !walkGoal) {
-      planNextAction();
-    } else if (showPopover || isPaused || isDragging) {
-      setIsWalking(false);
-      setWalkGoal(null);
-    }
-    
-    return () => {
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, [showPopover, isPaused, isDragging, taskbarInfo.dockWidth, taskbarInfo.dockTopY, isReady, walkGoal, name]);
-
-  const handleTransitionEnd = () => {
-    if (isWalking && walkGoal && !isDragging) {
-      progressRef.current = walkGoal.progress;
-      setIsWalking(false);
-      setWalkGoal(null);
-      // Planning restarts naturally because walkGoal is null now
+      setIsPopoverOpen(true);
+      setShowPopover(true);
+    } else {
+      setIsPaused(false);
+      setShowPopover(false);
+      setIsPopoverOpen(false);
     }
   };
 
-  const lastLayoutRef = useRef<{ width: number; top: number }>({ width: 0, top: 0 });
-
-  // Sync DOM position & transitions with zero clobbering
-  useEffect(() => {
-    if (containerRef.current) {
-      // If layout changed significantally (e.g. monitor resize), cancel active walk
-      const widthChanged = taskbarInfo.dockWidth !== lastLayoutRef.current.width;
-      const topChanged = taskbarInfo.dockTopY !== lastLayoutRef.current.top;
-      
-      if (widthChanged || topChanged) {
-        if (walkGoal) {
-          syncLogicalPosition(); // Capture current spot
-          setIsWalking(false);
-          setWalkGoal(null);
-        }
-        lastLayoutRef.current = { width: taskbarInfo.dockWidth || 0, top: taskbarInfo.dockTopY || 0 };
-      }
-
-      if (walkGoal && !isDragging) {
-        const x = walkGoal.progress * (taskbarInfo.dockWidth || 1);
-        const y = Math.max(0, taskbarInfo.dockTopY - DISPLAY_HEIGHT + yOffset);
-        // Explicitly set BOTH transition and transform in one tick
-        containerRef.current.style.transition = `transform ${walkGoal.duration}ms linear, opacity 0.2s ease-in`;
-        containerRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-      } else {
-        containerRef.current.style.transition = 'opacity 0.2s ease-in, transform 0s';
-        updateDOMPosition();
-      }
+  // ── Mouse enter / leave ──
+  const handleMouseEnter = () => {
+    if (isDraggingRef.current) return;
+    mouseOverCharacterRef.current = true;
+    updateMouseIgnore();
+    setShowTooltip(true);
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    tooltipTimerRef.current = setTimeout(() => setShowTooltip(false), TOOLTIP_DISPLAY_MS);
+    if (animPhaseRef.current !== 'idle') {
+      gracefulEndWalk();
+    } else {
+      setIsPaused(true);
     }
-  }, [walkGoal, isDragging, updateDOMPosition, taskbarInfo.dockWidth, taskbarInfo.dockTopY, yOffset]);
+  };
+
+  const handleMouseLeave = () => {
+    if (isDraggingRef.current) return;
+    mouseOverCharacterRef.current = false;
+    updateMouseIgnore();
+    gracefulExitRef.current = false;
+    if (!showPopover) setIsPaused(false);
+    setShowTooltip(false);
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+  };
 
   return (
     <>
       <style>{`
-        @keyframes walk {
-          from { background-position: 0 0; }
-          to { background-position: -800% 0; }
-        }
-        @keyframes tooltipFadeIn {
-          from { opacity: 0; transform: translate(-50%, 5px); }
-          to { opacity: 1; transform: translate(-50%, 0); }
-        }
-        @keyframes bounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-4px); }
-        }
+        @keyframes tooltipFadeIn { from { opacity: 0; transform: translate(-50%, 5px); } to { opacity: 1; transform: translate(-50%, 0); } }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
       `}</style>
-      <div 
+      <div
         ref={containerRef}
-        onTransitionEnd={handleTransitionEnd}
         style={{
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          width: DISPLAY_WIDTH,
-          height: DISPLAY_HEIGHT,
-          pointerEvents: 'auto',
-          cursor: 'pointer',
-          zIndex: 10,
+          position: 'absolute', left: 0, top: 0,
+          width: displayW, height: displayH,
+          pointerEvents: 'auto', cursor: 'pointer', zIndex: 10,
           display: (visible === false) ? 'none' : 'block',
-          opacity: isReady ? 1 : 0, 
-          // COMPOSITE PERFORMANCE & STABILITY
+          opacity: isReady ? 1 : 0,
           backfaceVisibility: 'hidden',
-          WebkitBackfaceVisibility: 'hidden',
-          transformStyle: 'preserve-3d',
-          willChange: 'transform, opacity', 
         }}
       >
         <div
@@ -439,74 +499,56 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
           onMouseLeave={handleMouseLeave}
           onPointerDown={handlePointerDown}
         >
-          <div style={{
-            width: '100%',
-            height: '100%',
-            backgroundImage: "url('" + sprite + "')",
-            backgroundSize: '800% 100%',
-            imageRendering: 'pixelated',
-            animation: isWalking ? 'walk 0.8s steps(8) infinite' : 'none',
-            backgroundPosition: '0 0',
-          }} />
+          <canvas
+            ref={canvasRef}
+            style={{ width: '100%', height: '100%', imageRendering: 'auto' }}
+            width={cfg.frameWidth}
+            height={cfg.frameHeight}
+          />
         </div>
 
-        {/* Custom tooltip — auto-hides after 800ms */}
         {showTooltip && (
           <div style={{
-            position: 'absolute',
-            bottom: '105%',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            backgroundColor: 'rgba(20,20,28,0.88)',
-            color: '#ddd',
-            fontSize: '11px',
-            padding: '3px 8px',
-            borderRadius: '6px',
-            whiteSpace: 'nowrap',
-            pointerEvents: 'none',
-            border: '1px solid rgba(255,255,255,0.1)',
-            animation: 'tooltipFadeIn 0.15s ease',
+            position: 'absolute', bottom: '105%', left: '50%', transform: 'translateX(-50%)',
+            backgroundColor: 'rgba(20,20,28,0.88)', color: '#ddd', fontSize: '11px', padding: '3px 8px',
+            borderRadius: '6px', whiteSpace: 'nowrap', pointerEvents: 'none',
+            border: '1px solid rgba(255,255,255,0.1)', animation: 'tooltipFadeIn 0.15s ease',
           }}>{name}</div>
         )}
 
-        {/* Unread Bubble */}
         {hasUnread && !showPopover && (
           <div style={{
-            position: 'absolute',
-            bottom: '90%',
-            left: goingRight ? '70%' : '10%',
-            backgroundColor: 'rgba(255,255,255,0.95)',
-            color: '#333',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            padding: '4px 8px',
-            borderRadius: '12px',
+            position: 'absolute', bottom: '90%', left: goingRight ? '70%' : '10%',
+            backgroundColor: 'rgba(255,255,255,0.95)', color: '#333', fontSize: '14px', fontWeight: 'bold',
+            padding: '4px 8px', borderRadius: '12px',
             borderBottomLeftRadius: goingRight ? '0' : '12px',
             borderBottomRightRadius: goingRight ? '12px' : '0',
-            whiteSpace: 'nowrap',
-            pointerEvents: 'none',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-            animation: 'bounce 2s infinite ease-in-out',
-            zIndex: 20
+            whiteSpace: 'nowrap', pointerEvents: 'none',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)', animation: 'bounce 2s infinite ease-in-out', zIndex: 20,
           }}>···</div>
         )}
 
-        {/* Popover */}
-        {showPopover && (
+        {isPopoverOpen && createPortal(
           <TerminalPopover
             name={name}
             history={chatHistory}
             isThinking={isThinking}
             onSubmitMessage={handleSubmitMessage}
             onClearHistory={handleClearHistory}
+            popoverScreenX={popoverX}
+            characterScreenY={popoverY}
             onClose={() => {
               setShowPopover(false);
               setIsPaused(false);
-              if ((window as any).electronAPI) {
-                (window as any).electronAPI.setIgnoreMouseEvents(true, { forward: true });
-              }
+              setIsPopoverOpen(false);
+              setDragPositionState(null);
+              mouseOverPopoverRef.current = false;
+              updateMouseIgnore();
             }}
-          />
+            onPopoverMouseEnter={() => { mouseOverPopoverRef.current = true; updateMouseIgnore(); }}
+            onPopoverMouseLeave={() => { mouseOverPopoverRef.current = false; updateMouseIgnore(); }}
+          />,
+          document.body
         )}
       </div>
     </>

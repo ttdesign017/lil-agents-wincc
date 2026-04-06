@@ -37,5 +37,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('set-app-theme', handler);
     return () => ipcRenderer.off('set-app-theme', handler);
   },
+  onDisplayChange: (callback: () => void) => {
+    const handler = (_event: any) => callback();
+    ipcRenderer.on('display-metrics-changed', handler);
+    return () => ipcRenderer.off('display-metrics-changed', handler);
+  },
   openExternal: (url: string) => ipcRenderer.send('open-external', url),
 });

@@ -14,10 +14,15 @@ interface TerminalPopoverProps {
   isThinking: boolean;
   onSubmitMessage: (text: string) => void;
   onClearHistory: () => void;
+  popoverScreenX: number; // center X in screen coords
+  characterScreenY: number; // top Y of character in screen coords
+  onPopoverMouseEnter?: () => void;
+  onPopoverMouseLeave?: () => void;
 }
 
-const TerminalPopover: React.FC<TerminalPopoverProps> = ({ 
-  onClose, name, history, isThinking, onSubmitMessage, onClearHistory 
+const TerminalPopover: React.FC<TerminalPopoverProps> = ({
+  onClose, name, history, isThinking, onSubmitMessage, onClearHistory,
+  popoverScreenX, characterScreenY, onPopoverMouseEnter, onPopoverMouseLeave,
 }) => {
   const [input, setInput] = useState('');
   const endOfLogRef = useRef<HTMLDivElement>(null);
@@ -27,13 +32,6 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
     // Focus input when popover opens
     setTimeout(() => inputRef.current?.focus(), 50);
   }, []);
-
-  useEffect(() => {
-    // Focus input when Claude finishes thinking
-    if (!isThinking) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
-  }, [isThinking]);
 
   const isFirstScroll = useRef(true);
 
@@ -76,15 +74,11 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
   };
 
   const handleMouseEnter = () => {
-    if ((window as any).electronAPI) {
-      (window as any).electronAPI.setIgnoreMouseEvents(false);
-    }
+    onPopoverMouseEnter?.();
   };
 
   const handleMouseLeave = () => {
-    if ((window as any).electronAPI) {
-      (window as any).electronAPI.setIgnoreMouseEvents(true, { forward: true });
-    }
+    onPopoverMouseLeave?.();
   };
 
   const userColor = name === '刘小红' ? 'var(--accent-color)' : (name === '绿油油' ? '#808000' : 'var(--accent-color)');
@@ -92,12 +86,12 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
   return (
     <div
       style={{
-        position: 'absolute',
-        bottom: '100%',
-        left: '50%',
+        position: 'fixed',
+         top: Math.max(20, characterScreenY - 340), // above character, clamped to stay on screen
+        left: popoverScreenX,
         transform: 'translateX(-50%)',
-        marginBottom: '12px',
         width: '420px',
+        maxWidth: '90vw',
         height: '320px',
         backgroundColor: 'var(--bg-color)',
         backdropFilter: 'blur(var(--bg-blur))',
@@ -108,8 +102,7 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
         boxShadow: 'var(--shadow)',
         pointerEvents: 'auto',
         overflow: 'hidden',
-        zIndex: 100,
-        // Set dynamic variables
+        zIndex: 10000,
         ['--user-color' as any]: userColor,
       }}
       onMouseEnter={handleMouseEnter}

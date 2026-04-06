@@ -1,9 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import WalkerCharacter from './components/WalkerCharacter';
 
 function App() {
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [isVisible, setIsVisible] = useState(false);
   const [taskbarInfo, setTaskbarInfo] = useState({
     dockX: 0,
     dockWidth: 0,
@@ -15,7 +13,7 @@ function App() {
   const [showJazz, setShowJazz] = useState(true);
   const [theme, setTheme] = useState('neon');
 
-  const getInfo = async () => {
+  const getInfo = useCallback(async () => {
     if ((window as any).electronAPI) {
       const info = await (window as any).electronAPI.getTaskbarInfo();
       setTaskbarInfo(info);
@@ -27,20 +25,20 @@ function App() {
         screenWidth: window.innerWidth
       });
     }
-    setIsLoaded(true);
-    // Only set visible once to prevent flickering characters on resize
-    if (!isVisible) {
-      setTimeout(() => setIsVisible(true), 200);
-    }
-  };
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.className = `theme-${theme}`;
+  }, [theme]);
 
   useEffect(() => {
     getInfo();
     window.addEventListener('resize', getInfo);
-    
+
     let offToggle: (() => void) | undefined;
     let offTheme: (() => void) | undefined;
-    
+    let offDisplay: (() => void) | undefined;
+
     if ((window as any).electronAPI) {
       offToggle = (window as any).electronAPI.onToggleVisibility((name: string, visible: boolean) => {
         if (name === '绿油油') setShowBruce(visible);
@@ -50,14 +48,19 @@ function App() {
       offTheme = (window as any).electronAPI.onThemeChange((newTheme: string) => {
         setTheme(newTheme);
       });
+
+      offDisplay = (window as any).electronAPI.onDisplayChange?.(() => {
+        getInfo();
+      });
     }
 
     return () => {
       window.removeEventListener('resize', getInfo);
       offToggle?.();
       offTheme?.();
+      offDisplay?.();
     };
-  }, [isVisible]); // Add isVisible as dependency for the update check
+  }, [getInfo]);
 
   const containerStyle: React.CSSProperties = {
     width: '100%',
@@ -66,25 +69,21 @@ function App() {
     pointerEvents: 'none'
   };
 
-  if (!isLoaded || !isVisible) return null;
-
   return (
     <div style={containerStyle} className={`theme-${theme}`}>
-      <WalkerCharacter 
-        key="bruce-green"
+      <WalkerCharacter
         name="绿油油"
         sprite="./assets/bruce.png"
         taskbarInfo={taskbarInfo}
-        positionProgress={0.3}
+        initialProgress={0.3}
         yOffset={0}
         visible={showBruce}
       />
-      <WalkerCharacter 
-        key="jazz-red"
+      <WalkerCharacter
         name="刘小红"
         sprite="./assets/jazz.png"
         taskbarInfo={taskbarInfo}
-        positionProgress={0.7}
+        initialProgress={0.7}
         yOffset={0}
         visible={showJazz}
       />

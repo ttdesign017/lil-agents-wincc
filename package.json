@@ -2,6 +2,7 @@
   "name": "lil-agents-win",
   "version": "1.0.0",
   "description": "Desktop AI pets",
+  "type": "module",
   "main": "dist-electron/main.js",
   "author": "LilAgents",
   "license": "ISC",
@@ -10,7 +11,6 @@
     "build": "tsc && vite build && electron-builder"
   },
   "dependencies": {
-    "lucide-react": "^0.300.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
@@ -38,7 +38,8 @@
       "target": [
         "dir"
       ],
-      "publish": null
+      "publish": null,
+      "sign": null
     },
     "extraResources": [
       {
