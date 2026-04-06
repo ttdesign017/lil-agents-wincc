@@ -97,7 +97,7 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
   const showPopoverRef = useRef(showPopover);
 
   const updateMouseIgnore = useCallback(() => {
-    const shouldIgnore = !mouseOverCharacterRef.current && !mouseOverPopoverRef.current && !showPopoverRef.current;
+    const shouldIgnore = !mouseOverCharacterRef.current && !mouseOverPopoverRef.current;
     if ((window as any).electronAPI) {
       (window as any).electronAPI.setIgnoreMouseEvents(shouldIgnore, { forward: true });
     }
@@ -110,7 +110,24 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
   useEffect(() => {
     const img = new Image();
     img.src = sprite;
-    img.onload = () => { imgRef.current = img; imageReadyRef.current = true; };
+    img.onload = () => {
+      imgRef.current = img;
+      imageReadyRef.current = true;
+      // Paint initial idle frame
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const col = cfg.startMin % cfg.cols;
+      const row = Math.floor(cfg.startMin / cfg.cols);
+      ctx.clearRect(0, 0, cfg.frameWidth, cfg.frameHeight);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(
+        img, col * cfg.frameWidth, row * cfg.frameHeight, cfg.frameWidth, cfg.frameHeight,
+        0, 0, cfg.frameWidth, cfg.frameHeight,
+      );
+      animFrameRef.current = cfg.startMin;
+    };
     return () => cancelAnimationFrame(rafRef.current);
   }, [sprite]);
 
@@ -144,9 +161,7 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
   // no-op removed — progressRef always tracks logical position
 
   useEffect(() => { popoverRef.current = showPopover; }, [showPopover, popoverRef]);
-
   useEffect(() => { showPopoverRef.current = showPopover; }, [showPopover]);
-
   // ── rAF loop: frames + eased position ──
   const animTick = useCallback((time: number) => {
     if (lastAnimTimeRef.current === 0) lastAnimTimeRef.current = time;
