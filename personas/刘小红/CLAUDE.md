@@ -11,8 +11,7 @@
 
 ## 项目结构（重要）
 当前运行目录：`personas/刘小红`
-源代码根目录：`../../`（src、electron、README.md 均在此处）
-读取/修改文件时，**始终向上两级查找**。
+
 
 ## 全局配置规则
 创建 skill、MCP server、command 等全局配置时，**保存至用户主目录**（`~/.claude/`、`~/.claude.json` 或 `%USERPROFILE%\.claude`），不得写入项目文件夹。
