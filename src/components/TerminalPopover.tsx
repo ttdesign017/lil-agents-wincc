@@ -208,7 +208,7 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={isThinking ? 'Waiting for response...' : 'Ask Claude...'}
-          disabled={isThinking}
+          readOnly={isThinking}
           rows={1}
           spellCheck={false}
           autoCorrect="off"
@@ -227,6 +227,7 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
             margin: 0,
             overflowY: 'auto',
             opacity: isThinking ? 0.5 : 1,
+            cursor: isThinking ? 'not-allowed' : 'text',
           }}
         />
       </form>
