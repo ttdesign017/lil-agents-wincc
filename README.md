@@ -1,81 +1,80 @@
-# Lil-Agents (Windows / Electron)
+# Lil-Agents (Windows / Electron 版)
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.2-blue.svg)](https://www.typescriptlang.org/)
-[![Electron](https://img.shields.io/badge/Electron-28.0-47848F.svg?logo=electron)](https://www.electronjs.org/)
-[![React](https://img.shields.io/badge/React-18.2-61DAFB.svg?logo=react)](https://react.dev/)
-[![Vite](https://img.shields.io/badge/Vite-5.0-646CFF.svg?logo=vite)](https://vitejs.dev/)
+[![Electron](https://img.shields.io/badge/Electron-28.0-47848F.svg?logo=electron)](httpshttps://www.electronjs.org/)
+[![React](https://img.shields.io/badge/React-18.2-61DAFB.svg?logo=react)](httpshttps://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-5.0-646CFF.svg?logo=vite)](httpshttps://vitejs.dev/)
 
-AI-powered desktop pets that patrol your Windows taskbar, powered by Claude.
+基于 Claude 的 AI 驱动桌面宠物，在你的 Windows 任务栏上自由漫步。
 
-## Overview
+> 本项目参考了 [lil-agents](https://github.com/ryanstephen/lil-agents) 的设计理念。
 
-Lil-Agents for Windows brings the macOS `lil-agents` experience to the Windows desktop. Characters roam your screen freely — click one to open a terminal-style chat window and converse with Claude directly from your desktop.
+## 项目概览
 
-**Key Features**
-- Pure CSS sprite-based animation, low GPU footprint
-- Click-through fullscreen overlay for seamless desktop interaction
-- Streaming AI responses via local Claude Code process
-- Personality profiles stored in `personas/` directory
+Lil-Agents for Windows 将 macOS 版 `lil-agents` 的体验带到了 Windows 桌面。角色会在你的屏幕上自由移动 —— 点击其中一个即可打开终端风格的聊天窗口，直接在桌面上与 Claude 进行对话。
 
-## Architecture
+**核心特性**
+- **轻量级动画**：基于 CSS Sprite 的纯动画实现，极低的 GPU 占用。
+- **点击穿透**：全屏透明覆盖层设计，确保不影响正常的桌面交互。
+- **实时 AI 对话**：通过本地 Claude Code 子进程实现流式响应。
+- **个性化人格**：角色的人格配置文件存储在 `personas/` 目录中。
 
-Electron main/renderer separation with `vite-plugin-electron` for unified builds.
+## 项目架构
+
+采用 Electron 主进程/渲染进程分离架构，使用 `vite-plugin-electron` 进行统一构建。
 
 ```
 lil-agents-wincc/
-├── electron/                     # Electron main process (Node.js)
-│   ├── main.ts                   # Transparent fullscreen window, taskbar positioning, IPC
-│   ├── preload.ts                # Context-isolated bridge (Window.electronAPI)
-│   └── ClaudeSession.ts          # Claude Code subprocess: stream-json output parsing
+├── electron/                     # Electron 主进程 (Node.js)
+│   ├── main.ts                   # 透明全屏窗口、任务栏定位、IPC 通信
+│   ├── preload.ts                # 上下文隔离桥接 (Window.electronAPI)
+│   └── ClaudeSession.ts          # Claude Code 子进程管理：解析 stream-json 输出
 │
-├── src/                          # Renderer process (React / TypeScript)
-│   ├── main.tsx                  # React root entry
-│   ├── App.tsx                   # Scene manager: coordinates character instances
+├── src/                          # 渲染进程 (React / TypeScript)
+│   ├── main.tsx                  # React 入口文件
+│   ├── App.tsx                   # 场景管理器：协调多个角色实例
 │   ├── components/
-│   │   ├── WalkerCharacter.tsx   # Game loop: sprite animation, collision, state management
-│   │   └── TerminalPopover.tsx   # AI chat UI: markdown rendering, glassmorphic popover
-│   └── index.css                 # Global styles
+│   │   ├── WalkerCharacter.tsx   # 游戏循环：Sprite 动画、碰撞检测、状态管理
+│   │   └── TerminalPopover.tsx   # AI 聊天 UI：Markdown 渲染、毛玻璃效果弹窗
+│   └── index.css                 # 全局样式
 │
-├── public/assets/                # Character sprite sheets (8-frame sprites)
-├── personas/                     # AI personality profiles (CLAUDE.md)
-├── vite.config.ts                # Vite + Electron build config
+├── public/assets/                # 角色 Sprite 表 (8 帧序列)
+├── personas/                     # AI 人格配置文件 (CLAUDE.md)
+├── vite.config.ts                # Vite + Electron 构建配置
 ├── package.json
 └── tsconfig.json
 ```
 
-## Technical Highlights
+## 技术亮点
 
-### CSS Sprite Animation
+### CSS Sprite 动画
+角色使用纯 CSS `steps(8)` 帧动画，通过 `requestAnimationFrame` 以 60fps 驱动。无需 Canvas，仅在 X 轴进行平滑位移，极大地降低了 GPU 开销。行走循环会在鼠标悬停或聊天激活时优雅地中断。
 
-Characters use pure CSS `steps(8)` frame animation driven by `requestAnimationFrame` at 60fps. No Canvas — minimal GPU overhead, smooth horizontal translation on the X-axis. Walk cycles are cleanly interrupted on hover or chat activation.
+### 点击穿透覆盖层
+通过创建一个无边框、置顶的全屏窗口，并设置 `setIgnoreMouseEvents(pointer-events: none)`，实现了完整的桌面穿透效果。只有当鼠标点击到角色 DOM 节点或聊天气泡时，才会捕获事件。
 
-### Click-Through Overlay
+### Claude IPC 通信
+使用 Node.js `child_process` 启动本地 `@anthropic-ai/claude-code` 子进程，并通过流式 I/O 进行通信。解析 `--output-format stream-json` 以实现实时的 Token 流式输出。即使 UI 被最小化，角色依然可以持续“思考”并响应。
 
-A borderless, always-on-top fullscreen window with `setIgnoreMouseEvents(pointer-events: none)` enables full desktop passthrough. Mouse events are only captured when hitting character DOM nodes or chat bubbles.
-
-### Claude IPC Communication
-
-Spawns a local `@anthropic-ai/claude-code` subprocess using Node.js `child_process` with stream-based I/O. Parses `--output-format stream-json` for real-time token streaming. Characters continue "thinking" and respond even when the UI is minimized.
-
-## Prerequisites
+## 环境准备
 
 - [Node.js](https://nodejs.org/) 18+
-- [Claude Code](https://github.com/anthropics/claude-code) installed globally (`npm i -g @anthropic-ai/claude-code`)
-- Authenticated Claude session (`claude auth login`)
+- 全局安装 [Claude Code](https://github.com/anthropics/claude-code) (`npm i -g @anthropic-ai/claude-code`)
+- 已登录的 Claude 会话 (`claude auth login`)
 
-## Getting Started
+## 快速开始
 
 ```bash
-# Install dependencies
+# 安装依赖
 npm install
 
-# Start development server with hot reload
+# 启动开发服务器 (支持热更新)
 npm run dev
 
-# Build and package distributable (Windows)
+# 构建并打包 Windows 安装包
 npm run build
 ```
 
-## License
+## 开源协议
 
 ISC
