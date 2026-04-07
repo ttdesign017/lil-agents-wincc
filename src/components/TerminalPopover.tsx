@@ -158,20 +158,21 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
             
             {msg.type === 'output' ? (
               <div className="markdown-container">
-                <ReactMarkdown 
+                <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{
-                    a: ({ node, ...props }) => (
-                      <a 
-                        {...props} 
+                    a: ({ node, href, title, ...rest }) => (
+                      <a
+                        href={href}
+                        title={title}
+                        {...rest}
                         onClick={(e) => {
-                          e.preventDefault(); // ALWAYS prevent default navigation
-                          if (e.ctrlKey && props.href && (window as any).electronAPI) {
-                            (window as any).electronAPI.openExternal(props.href);
+                          e.preventDefault();
+                          if (e.ctrlKey && href && (window as any).electronAPI) {
+                            (window as any).electronAPI.openExternal(href);
                           }
                         }}
                         style={{ cursor: 'pointer' }}
-                        title="Ctrl + Click to open link"
                       />
                     )
                   }}

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, shell } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { setupClaudeSession } from './ClaudeSession';
@@ -105,18 +105,16 @@ function createWindow() {
   }
 
   // Security: Prevent in-app navigation to remote sites
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    const { shell } = require('electron');
-    shell.openExternal(url);
-    return { action: 'deny' };
-  });
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+      shell.openExternal(url);
+      return { action: 'deny' };
+    });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
     // Only allow navigating to our own local app
     const currentUrl = mainWindow?.webContents.getURL();
     if (currentUrl && url !== currentUrl && !url.startsWith('file://')) {
       event.preventDefault();
-      const { shell } = require('electron');
       shell.openExternal(url);
     }
   });
@@ -179,6 +177,5 @@ ipcMain.handle('get-taskbar-info', () => {
 });
 
 ipcMain.on('open-external', (_event, url) => {
-  const { shell } = require('electron');
   shell.openExternal(url);
 });

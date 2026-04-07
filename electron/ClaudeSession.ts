@@ -131,7 +131,7 @@ export function setupClaudeSession(mainWindow: Electron.BrowserWindow) {
         ...process.env,
         FORCE_COLOR: '0',
         NO_COLOR: '1',
-        CLAUDE_CODE_DISABLE_CONTEXT_MANAGEMENT: '1',
+        CLAUDE_CODE_DISABLE_CONTEXT_MANAGEMENT: '0',
       },
     });
 
