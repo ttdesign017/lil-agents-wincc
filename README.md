@@ -47,8 +47,11 @@ lil-agents-wincc/
 
 ## 技术亮点
 
-### CSS Sprite 动画
-角色使用纯 CSS `steps(8)` 帧动画，通过 `requestAnimationFrame` 以 60fps 驱动。无需 Canvas，仅在 X 轴进行平滑位移，极大地降低了 GPU 开销。行走循环会在鼠标悬停或聊天激活时优雅地中断。
+### Canvas 驱动的高性能动画引擎
+
+角色使用基于 `requestAnimationFrame` 的 Canvas 渲染引擎，以稳定的 **30 FPS** 进行动画更新。通过手动控制每一帧的绘制（配合 `imageSmoothingEnabled = false`），在保持像素艺术清晰度的同时，实现了极低的 GPU 开销。
+
+采用基于时间步长（Time-based）的位置插值算法，确保角色在不同刷新率的屏幕上都能保持一致的移动速度。动画逻辑由一套完整的状态机驱动：从启动阶段（START）的平滑加速，到循环行走阶段（LOOP），再到结束阶段（END）的减速停止，实现了极其自然的行走体验。
 
 ### 点击穿透覆盖层
 通过创建一个无边框、置顶的全屏窗口，并设置 `setIgnoreMouseEvents(pointer-events: none)`，实现了完整的桌面穿透效果。只有当鼠标点击到角色 DOM 节点或聊天气泡时，才会捕获事件。
