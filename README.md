@@ -5,6 +5,8 @@
 [![React](https://img.shields.io/badge/React-18.2-61DAFB.svg?logo=react)](httpshttps://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-5.0-646CFF.svg?logo=vite)](httpshttps://vitejs.dev/)
 
+![preview](C:\Users\64828\Documents\VibeCoding\lil-agents-wincc\public\assets\preview.png)
+
 基于 Claude 的 AI 驱动桌面宠物，在你的 Windows 任务栏上自由漫步。
 
 > 本项目参考了 [lil-agents](https://github.com/ryanstephen/lil-agents) 的设计理念。
@@ -58,6 +60,10 @@ lil-agents-wincc/
 
 ### Claude IPC 通信
 使用 Node.js `child_process` 启动本地 `@anthropic-ai/claude-code` 子进程，并通过流式 I/O 进行通信。解析 `--output-format stream-json` 以实现实时的 Token 流式输出。即使 UI 被最小化，角色依然可以持续“思考”并响应。
+
+### 聊天功能
+
+聊天窗口支持 **Markdown** 渲染，包括：LaTeX 数学公式（`$...$` 或 `$$...$$`）、代码块语法高亮、表格、任务列表等。
 
 ## 环境准备
 
