@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 interface Message {
   type: 'output' | 'error' | 'user' | 'thinking';
@@ -83,6 +88,92 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
 
   const userColor = name === '刘小红' ? 'var(--accent-color)' : (name === '绿油油' ? '#808000' : 'var(--accent-color)');
 
+// Code block component with copy button
+const CodeBlock: React.FC<{ language: string; children: string }> = ({ language, children }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(children);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const CopyIcon = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+    </svg>
+  );
+
+  const CheckIcon = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12"></polyline>
+    </svg>
+  );
+
+  return (
+    <div style={{ position: 'relative', margin: '8px 0' }}>
+      <button
+        onClick={handleCopy}
+        style={{
+          position: 'absolute',
+          top: '8px',
+          right: '8px',
+          width: '26px',
+          height: '26px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: 'rgba(255, 255, 255, 0.08)',
+          color: 'rgba(255, 255, 255, 0.6)',
+          border: 'none',
+          borderRadius: '4px',
+          cursor: 'pointer',
+          zIndex: 1,
+          transition: 'all 0.2s ease',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
+          e.currentTarget.style.color = 'rgba(255, 255, 255, 0.9)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+          e.currentTarget.style.color = 'rgba(255, 255, 255, 0.6)';
+        }}
+        title={copied ? '已复制!' : '复制代码'}
+      >
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </button>
+      <SyntaxHighlighter
+        language={language || 'text'}
+        style={{
+          ...vscDarkPlus,
+          'pre[class*="language-"]': {
+            ...vscDarkPlus['pre[class*="language-"]'],
+            backgroundColor: '#1e1e1e',
+          },
+          'code[class*="language-"]': {
+            ...vscDarkPlus['code[class*="language-"]'],
+            backgroundColor: '#1e1e1e',
+          },
+        }}
+        customStyle={{
+          borderRadius: '8px',
+          padding: '16px',
+          fontSize: '12px',
+          lineHeight: '1.6',
+          margin: '0',
+          overflowX: 'auto',
+          backgroundColor: '#1e1e1e',
+        }}
+        codeTagProps={{ style: { fontFamily: 'Consolas, Monaco, "Courier New", monospace', backgroundColor: '#1e1e1e' } }}
+      >
+        {children}
+      </SyntaxHighlighter>
+    </div>
+  );
+};
+
   return (
     <div
       style={{
@@ -159,8 +250,34 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
             {msg.type === 'output' ? (
               <div className="markdown-container">
                 <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
+                  remarkPlugins={[remarkGfm, remarkMath]}
+                  rehypePlugins={[rehypeKatex]}
                   components={{
+                    code: ({ node, inline, className, children, ...props }) => {
+                      const match = /language-(\w+)/.exec(className || '');
+                      const language = match ? match[1] : '';
+
+                      if (!inline && match) {
+                        return <CodeBlock language={language}>{String(children).replace(/\n$/, '')}</CodeBlock>;
+                      }
+
+                      return (
+                        <code
+                          className={className}
+                          style={{
+                            backgroundColor: 'rgba(127, 127, 127, 0.2)',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+                            fontSize: '12px',
+                            color: 'var(--text-color)',
+                          }}
+                          {...props}
+                        >
+                          {children}
+                        </code>
+                      );
+                    },
                     a: ({ node, href, title, ...rest }) => (
                       <a
                         href={href}

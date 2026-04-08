@@ -11,10 +11,15 @@
     "build": "tsc && vite build && electron-builder"
   },
   "dependencies": {
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "katex": "^0.16.45",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "react-syntax-highlighter": "^16.1.1",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",
