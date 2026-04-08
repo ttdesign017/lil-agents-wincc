@@ -5,7 +5,7 @@
 [![React](https://img.shields.io/badge/React-18.2-61DAFB.svg?logo=react)](httpshttps://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-5.0-646CFF.svg?logo=vite)](httpshttps://vitejs.dev/)
 
-![preview](C:\Users\64828\Documents\VibeCoding\lil-agents-wincc\public\assets\preview.png)
+![preview](.\public\assets\preview.png)
 
 基于 Claude 的 AI 驱动桌面宠物，在你的 Windows 任务栏上自由漫步。
 
