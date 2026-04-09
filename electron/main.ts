@@ -1,5 +1,6 @@
-import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, screen, Tray, Menu, nativeImage, shell } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { setupClaudeSession } from './ClaudeSession';
 
@@ -178,4 +179,42 @@ ipcMain.handle('get-taskbar-info', () => {
 
 ipcMain.on('open-external', (_event, url) => {
   shell.openExternal(url);
+});
+
+// Image picker: selects files, reads them, returns base64 data
+ipcMain.handle('select-image', async () => {
+  // The mainWindow is an alwaysOnTop toolbar window that covers the entire screen.
+  // We must temporarily lower its Z-level so the dialog is visible.
+  if (!mainWindow) return [];
+
+  // Lower the window Z-level so the dialog can appear on top
+  mainWindow.setAlwaysOnTop(false);
+  const result = await dialog.showOpenDialog({
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }],
+  });
+  mainWindow.setAlwaysOnTop(true, 'screen-saver');
+
+  // Log for debugging
+  console.log('[select-image] canceled:', result.canceled, 'files:', result.filePaths.length);
+  if (result.canceled || result.filePaths.length === 0) return [];
+
+  const images: Array<{ mimeType: string; data: string }> = [];
+  for (const filePath of result.filePaths) {
+    try {
+      const ext = filePath.split('.').pop()?.toLowerCase();
+      const mimeTypeMap: Record<string, string> = {
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+        gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+      };
+      const mimeType = mimeTypeMap[ext || ''] || 'image/png';
+      const fileBuffer = fs.readFileSync(filePath);
+      const base64 = fileBuffer.toString('base64');
+      images.push({ mimeType, data: base64 });
+    } catch (e) {
+      console.error('[select-image] failed to read file:', filePath, e);
+    }
+  }
+  console.log('[select-image] returning', images.length, 'images');
+  return images;
 });

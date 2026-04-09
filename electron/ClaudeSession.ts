@@ -9,6 +9,16 @@ interface ClaudeState {
   startedAt: number;
 }
 
+interface ImageAttachment {
+  mimeType: string;
+  data: string; // base64
+}
+
+interface ClaudeInput {
+  text: string;
+  images?: ImageAttachment[];
+}
+
 const MAX_SESSIONS = 2;
 const sessions = new Map<string, ClaudeState>();
 
@@ -169,7 +179,7 @@ export function setupClaudeSession(mainWindow: Electron.BrowserWindow) {
     startSession(sessionId);
   });
 
-  ipcMain.on('send-claude-input', (event, sessionId: string, input: string) => {
+  ipcMain.on('send-claude-input', (event, sessionId: string, input: string | ClaudeInput) => {
     if (!sessions.has(sessionId)) {
       startSession(sessionId);
       // Give it a moment to boot before sending
@@ -179,12 +189,37 @@ export function setupClaudeSession(mainWindow: Electron.BrowserWindow) {
     }
   });
 
-  function sendMessage(sessionId: string, input: string) {
+  function sendMessage(sessionId: string, input: string | ClaudeInput) {
     const state = sessions.get(sessionId);
     if (!state) return;
+
+    if (typeof input === 'string') {
+      // Backward compatible: plain text
+      const payload = {
+        type: 'user',
+        message: { role: 'user', content: input }
+      };
+      state.process.stdin.write(JSON.stringify(payload) + '\n');
+      return;
+    }
+
+    // New format: content blocks with images
+    const contentBlocks: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [];
+    if (input.images && input.images.length > 0) {
+      for (const img of input.images) {
+        contentBlocks.push({
+          type: 'image',
+          source: { type: 'base64', media_type: img.mimeType, data: img.data }
+        });
+      }
+    }
+    if (input.text) {
+      contentBlocks.push({ type: 'text', text: input.text });
+    }
+
     const payload = {
       type: 'user',
-      message: { role: 'user', content: input }
+      message: { role: 'user', content: contentBlocks }
     };
     state.process.stdin.write(JSON.stringify(payload) + '\n');
   }

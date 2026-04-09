@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import TerminalPopover from './TerminalPopover';
-import { useClaudeSession } from '../hooks/useClaudeSession';
+import { useClaudeSession, ImageAttachment } from '../hooks/useClaudeSession';
 import {
   CHAR_CONFIGS,
   CharSpriteConfig,
@@ -76,6 +76,8 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [popoverX, setPopoverX] = useState(0);
   const [popoverY, setPopoverY] = useState(0);
+  const [inputText, setInputText] = useState('');
+  const [pendingImages, setPendingImages] = useState<ImageAttachment[]>([]);
 
   // Animation state
   const rafRef = useRef(0);
@@ -563,6 +565,10 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
             }}
             onPopoverMouseEnter={() => { mouseOverPopoverRef.current = true; updateMouseIgnore(); }}
             onPopoverMouseLeave={() => { mouseOverPopoverRef.current = false; updateMouseIgnore(); }}
+            inputText={inputText}
+            onInputTextChange={setInputText}
+            pendingImages={pendingImages}
+            onPendingImagesChange={setPendingImages}
           />,
           document.body
         )}

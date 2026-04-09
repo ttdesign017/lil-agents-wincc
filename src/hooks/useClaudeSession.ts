@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
+export interface ImageAttachment {
+  mimeType: string;
+  data: string; // base64
+}
+
 export interface Message {
   type: 'output' | 'error' | 'user' | 'thinking';
   text: string;
+  images?: ImageAttachment[];
 }
 
 export function useClaudeSession(name: string) {
@@ -88,11 +94,17 @@ export function useClaudeSession(name: string) {
     };
   }, [name]); // chatLimitWarned read via functional updater, no need in deps
 
-  const handleSubmitMessage = useCallback((text: string) => {
-    setChatHistory(prev => [...prev, { type: 'user', text }]);
+  const handleSubmitMessage = useCallback((text: string, images?: ImageAttachment[]) => {
+    setChatHistory(prev => [...prev, { type: 'user', text, images: images && images.length > 0 ? images : undefined }]);
     setIsThinking(true);
     setHasUnread(false);
-    if ((window as any).electronAPI) (window as any).electronAPI.sendClaudeInput(name, text);
+    if ((window as any).electronAPI) {
+      if (images && images.length > 0) {
+        (window as any).electronAPI.sendClaudeInput(name, { text, images });
+      } else {
+        (window as any).electronAPI.sendClaudeInput(name, text);
+      }
+    }
   }, [name]);
 
   const handleClearHistory = useCallback(() => {

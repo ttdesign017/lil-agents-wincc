@@ -36,6 +36,11 @@ html, body, #root {
   --code-text: #7ee787;
   --link-color: #c678dd;
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  --chat-bubble-bg: rgba(86, 182, 194, 0.1);
+  --chat-bubble-text: rgba(165, 220, 235, 0.95);
+  --chat-bubble-radius: 14px 14px 4px 14px;
+  --chat-bubble-border: none;
+  --chat-bubble-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
 .theme-corporate {
@@ -52,6 +57,11 @@ html, body, #root {
   --code-text: #27ae60;
   --link-color: #e67e22;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+  --chat-bubble-bg: rgba(41, 128, 185, 0.08);
+  --chat-bubble-text: rgba(44, 62, 80, 0.95);
+  --chat-bubble-radius: 18px;
+  --chat-bubble-border: none;
+  --chat-bubble-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .theme-toxic {

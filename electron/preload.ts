@@ -5,7 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('set-ignore-mouse-events', ignore, options),
   getTaskbarInfo: () => ipcRenderer.invoke('get-taskbar-info'),
   startClaude: (sessionId: string) => ipcRenderer.send('start-claude', sessionId),
-  sendClaudeInput: (sessionId: string, input: string) => ipcRenderer.send('send-claude-input', sessionId, input),
+  sendClaudeInput: (sessionId: string, input: string | { text: string; images?: Array<{ mimeType: string; data: string }> }) => ipcRenderer.send('send-claude-input', sessionId, input),
   killClaude: (sessionId: string) => ipcRenderer.send('kill-claude', sessionId),
   onClaudeData: (id: string, callback: (data: string) => void) => {
     const handler = (_event: any, respId: string, data: string) => { if (id === respId) callback(data); };
@@ -43,4 +43,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off('display-metrics-changed', handler);
   },
   openExternal: (url: string) => ipcRenderer.send('open-external', url),
+  selectImage: () => ipcRenderer.invoke('select-image'),
 });
