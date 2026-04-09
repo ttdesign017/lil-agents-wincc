@@ -84,7 +84,7 @@ function createWindow() {
     resizable: false,
     type: 'toolbar',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -189,14 +189,14 @@ ipcMain.handle('select-image', async () => {
 
   // Lower the window Z-level so the dialog can appear on top
   mainWindow.setAlwaysOnTop(false);
+  // Add small delay to ensure Windows processes the Z-order change
+  await new Promise(resolve => setTimeout(resolve, 100));
   const result = await dialog.showOpenDialog({
     properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }],
   });
   mainWindow.setAlwaysOnTop(true, 'screen-saver');
 
-  // Log for debugging
-  console.log('[select-image] canceled:', result.canceled, 'files:', result.filePaths.length);
   if (result.canceled || result.filePaths.length === 0) return [];
 
   const images: Array<{ mimeType: string; data: string }> = [];
@@ -215,6 +215,30 @@ ipcMain.handle('select-image', async () => {
       console.error('[select-image] failed to read file:', filePath, e);
     }
   }
-  console.log('[select-image] returning', images.length, 'images');
   return images;
+});
+
+// Export: save chat history to a markdown file
+ipcMain.handle('export-chat', async (_event, filename: string, content: string) => {
+  if (!mainWindow) return false;
+
+  // Lower the window Z-level so the dialog can appear on top
+  mainWindow.setAlwaysOnTop(false);
+  // Add small delay to ensure Windows processes the Z-order change
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const result = await dialog.showSaveDialog({
+    defaultPath: filename,
+    filters: [{ name: 'Markdown', extensions: ['md'] }],
+  });
+  mainWindow.setAlwaysOnTop(true, 'screen-saver');
+
+  if (result.canceled || !result.filePath) return false;
+
+  try {
+    fs.writeFileSync(result.filePath, content, 'utf-8');
+    return true;
+  } catch (e) {
+    console.error('[export-chat] failed to write:', e);
+    return false;
+  }
 });

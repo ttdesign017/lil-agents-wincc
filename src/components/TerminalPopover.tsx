@@ -8,6 +8,23 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { ImageAttachment, Message } from '../hooks/useClaudeSession';
 
+function formatMarkdown(history: Message[], personaName: string): string {
+  const lines: string[] = [];
+  for (const msg of history) {
+    if (msg.type === 'user') {
+      lines.push(`**User**: ${msg.text}`.trim());
+    } else if (msg.type === 'output') {
+      lines.push(`**${personaName}**: ${msg.text}`.trim());
+    } else if (msg.type === 'error') {
+      lines.push(`**Error**: ${msg.text}`);
+    } else if (msg.type === 'thinking') {
+      lines.push(`_${msg.text}_`);
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
 interface TerminalPopoverProps {
   onClose: () => void;
   name: string;
@@ -34,9 +51,16 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
-  // Focus input when popover opens
+  // Focus input when popover opens and move cursor to end
   useEffect(() => {
-    const t = setTimeout(() => inputRef.current?.focus(), 50);
+    const t = setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+        // Move cursor to end of input
+        const len = inputRef.current.value.length;
+        inputRef.current.setSelectionRange(len, len);
+      }
+    }, 50);
     return () => clearTimeout(t);
   }, []);
 
@@ -122,6 +146,15 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
   const handleMouseLeave = () => onPopoverMouseLeave?.();
   const userColor = name === '刘小红' ? 'var(--accent-color)' : (name === '绿油油' ? '#808000' : 'var(--accent-color)');
 
+  // Export handler
+  const handleExport = useCallback(async () => {
+    if (!(window as any).electronAPI) return;
+    const md = formatMarkdown(history, name);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `chat-${name}-${timestamp}.md`;
+    await (window as any).electronAPI.exportChat(filename, md);
+  }, [history, name]);
+
   // ── Code block component ──
   const CodeBlock: React.FC<{ language: string; children: string }> = ({ language, children }) => {
     const [copied, setCopied] = useState(false);
@@ -164,12 +197,24 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
       {/* Title bar */}
       <div style={{ height: '34px', backgroundColor: 'var(--title-bg)', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px', flexShrink: 0 }}>
         <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-dim)', letterSpacing: '0.5px' }}>{name} · Claude</span>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
           {isThinking && (
             <span style={{ fontSize: '11px', color: 'var(--accent-color)', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <span style={{ animation: 'pulse 1.2s ease-in-out infinite' }}>●</span> thinking...
             </span>
           )}
+          <button onClick={handleExport}
+            style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px 4px', borderRadius: '4px' }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-color)'; e.currentTarget.style.backgroundColor = 'rgba(128,128,128,0.2)'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-dim)'; e.currentTarget.style.backgroundColor = 'transparent'; }}
+            title="导出聊天记录"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
           <button style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '16px', lineHeight: 1, padding: '2px 4px' }} onClick={onClose}>×</button>
         </div>
       </div>
@@ -251,13 +296,13 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
         )}
 
         <form ref={formRef} onSubmit={handleSubmit} onPaste={handlePaste}
-          style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', gap: '6px' }}>
+          style={{ display: 'flex', alignItems: 'flex-start', padding: '6px 12px 6px 8px', gap: '4px' }}>
           {/* Attachment button */}
           <button type="button" onClick={handleSelectFile} disabled={isThinking}
             style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center',
               backgroundColor: 'transparent', color: 'var(--text-dim)', border: 'none', borderRadius: '4px',
               cursor: 'pointer', flexShrink: 0, opacity: isThinking ? 0.3 : 1, padding: 0 }}
-            onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)'; }}
+            onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'rgba(128,128,128,0.2)'; }}
             onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
             title="添加图片"
           >
@@ -266,13 +311,13 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
             </svg>
           </button>
           {/* Prompt arrow */}
-          <span style={{ color: 'var(--accent-color)', fontSize: '14px', flexShrink: 0, lineHeight: '28px', marginLeft: '2px' }}>›</span>
+          <span style={{ color: 'var(--accent-color)', fontSize: '14px', flexShrink: 0, lineHeight: '28px', marginLeft: '0px', paddingTop: '0px' }}>›</span>
           {/* Textarea */}
           <textarea ref={inputRef} value={inputText} onChange={e => onInputTextChange(e.target.value)} onKeyDown={handleKeyDown}
             placeholder={isThinking ? 'Waiting for response...' : 'Ask Claude...'} readOnly={isThinking} rows={1}
             spellCheck={false} autoCorrect="off" autoCapitalize="off"
             style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-color)', outline: 'none',
-              fontSize: '13px', lineHeight: '1.4', fontFamily: 'inherit', resize: 'none', padding: 0, margin: 0,
+              fontSize: '13px', lineHeight: '1.4', fontFamily: 'inherit', resize: 'none', padding: '5px 0', margin: 0,
               overflowY: 'auto', opacity: isThinking ? 0.5 : 1, cursor: isThinking ? 'not-allowed' : 'text' }} />
         </form>
       </div>
