@@ -41,16 +41,17 @@ function createTray() {
     {
       label: '切换主题 (Themes)',
       submenu: [
-        { 
-          label: 'Neon-Noodle (Default)', 
-          type: 'radio', 
-          checked: true, 
-          click: () => mainWindow?.webContents.send('set-app-theme', 'neon') 
+        {
+          label: 'Neon-Noodle',
+          type: 'radio',
+          checked: false,
+          click: () => mainWindow?.webContents.send('set-app-theme', 'neon')
         },
-        { 
-          label: 'Corporate-Overlord', 
-          type: 'radio', 
-          click: () => mainWindow?.webContents.send('set-app-theme', 'corporate') 
+        {
+          label: 'Corporate-Overlord (Default)',
+          type: 'radio',
+          checked: true,
+          click: () => mainWindow?.webContents.send('set-app-theme', 'corporate')
         },
         { 
           label: 'Toxic-Greenhouse', 

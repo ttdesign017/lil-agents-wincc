@@ -11,7 +11,7 @@ function App() {
 
   const [showBruce, setShowBruce] = useState(true);
   const [showJazz, setShowJazz] = useState(true);
-  const [theme, setTheme] = useState('neon');
+  const [theme, setTheme] = useState('corporate');
 
   const getInfo = useCallback(async () => {
     if ((window as any).electronAPI) {

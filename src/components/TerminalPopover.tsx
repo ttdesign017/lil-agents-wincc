@@ -6,7 +6,7 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { ImageAttachment, Message } from '../hooks/useClaudeSession';
+import { ImageAttachment, Message, VideoAttachment } from '../hooks/useClaudeSession';
 
 function formatMarkdown(history: Message[], personaName: string): string {
   const lines: string[] = [];
@@ -30,7 +30,7 @@ interface TerminalPopoverProps {
   name: string;
   history: Message[];
   isThinking: boolean;
-  onSubmitMessage: (text: string, images?: ImageAttachment[]) => void;
+  onSubmitMessage: (text: string, images?: ImageAttachment[], videos?: VideoAttachment[]) => void;
   onClearHistory: () => void;
   popoverScreenX: number;
   characterScreenY: number;
@@ -50,6 +50,47 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
   const endOfLogRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const [pendingVideos, setPendingVideos] = useState<VideoAttachment[]>([]);
+
+  // 读取视频首帧作为缩略图
+  const getVideoThumbnail = useCallback((file: File): Promise<VideoAttachment> => {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.src = URL.createObjectURL(file);
+      video.crossOrigin = 'anonymous';
+
+      video.onloadeddata = () => {
+        // seek到第0.1秒获取首帧
+        video.currentTime = 0.1;
+      };
+
+      video.onseeked = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const thumbnail = canvas.toDataURL('image/jpeg', 0.8);
+        const commaIdx = thumbnail.indexOf(',');
+        URL.revokeObjectURL(video.src);
+
+        resolve({
+          path: (file as any).path || file.name,
+          thumbnail: thumbnail.slice(commaIdx + 1)
+        });
+      };
+
+      video.onerror = () => {
+        URL.revokeObjectURL(video.src);
+        reject(new Error('Failed to load video'));
+      };
+    });
+  }, []);
 
   // Focus input when popover opens and move cursor to end
   useEffect(() => {
@@ -127,15 +168,22 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
     onPendingImagesChange(pendingImages.filter((_, i) => i !== index));
   }, [pendingImages, onPendingImagesChange]);
 
+  // Remove a pending video
+  const removeVideo = useCallback((index: number) => {
+    setPendingVideos(pendingVideos.filter((_, i) => i !== index));
+  }, [pendingVideos]);
+
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if ((!inputText.trim() && pendingImages.length === 0) || isThinking) return;
+    if ((!inputText.trim() && pendingImages.length === 0 && pendingVideos.length === 0) || isThinking) return;
     const userText = inputText.trim();
     const images = pendingImages.length > 0 ? [...pendingImages] : undefined;
+    const videos = pendingVideos.length > 0 ? [...pendingVideos] : undefined;
     onInputTextChange('');
     onPendingImagesChange([]);
+    setPendingVideos([]);
     if (userText === '/clear') { onClearHistory(); return; }
-    onSubmitMessage(userText, images);
+    onSubmitMessage(userText, images, videos);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -225,25 +273,41 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
           /* User messages: right-aligned, images above text bubble */
           msg.type === 'user' ? (
             <div key={i} style={{ alignSelf: 'flex-end', maxWidth: '85%' }}>
-              {/* Images: plain, above bubble, no background/border/shadow */}
-              {msg.images && msg.images.length > 0 && (
+              {/* Images and Videos: plain, above bubble, no background/border/shadow */}
+              {((msg.images && msg.images.length > 0) || (msg.videos && msg.videos.length > 0)) && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: msg.text ? '6px' : 0, justifyContent: 'flex-end' }}>
-                  {msg.images.map((img, j) => (
-                    <img key={j} src={`data:${img.mimeType};base64,${img.data}`} alt=""
-                      style={{ maxWidth: '220px', maxHeight: '160px', borderRadius: '6px', objectFit: 'contain' }} />
+                  {msg.images?.map((img, j) => (
+                    <img key={`img-${j}`} src={`data:${img.mimeType};base64,${img.data}`} alt=""
+                      style={{ maxWidth: '220px', maxHeight: '100px', borderRadius: '6px', objectFit: 'contain' }} />
+                  ))}
+                  {msg.videos?.map((video, j) => (
+                    <div key={`video-${j}`} style={{ position: 'relative', height: '100px', maxWidth: '300px' }}>
+                      <img src={`data:image/jpeg;base64,${video.thumbnail}`} alt="Video thumbnail"
+                        style={{ height: '100%', width: 'auto', maxWidth: '100%', borderRadius: '6px', objectFit: 'contain' }} />
+                      {/* 视频播放图标叠加 */}
+                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '6px' }}>
+                        <svg viewBox="0 0 24 24" fill="white" stroke="none" width="32" height="32">
+                          <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                        </svg>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
               {/* Text bubble: only if there is text */}
               {msg.text && (
-                <div style={{
-                  backgroundColor: 'var(--chat-bubble-bg)',
-                  borderRadius: 'var(--chat-bubble-radius)',
-                  padding: '8px 12px',
-                  boxShadow: 'var(--chat-bubble-shadow)',
-                  wordBreak: 'break-word',
-                }}>
-                  <span style={{ color: 'var(--chat-bubble-text)', whiteSpace: 'pre-wrap' }}>{msg.text}</span>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{
+                    display: 'inline-block',
+                    backgroundColor: 'var(--chat-bubble-bg)',
+                    borderRadius: 'var(--chat-bubble-radius)',
+                    padding: '8px 12px',
+                    boxShadow: 'var(--chat-bubble-shadow)',
+                    wordBreak: 'break-word',
+                    textAlign: 'left',
+                  }}>
+                    <span style={{ color: 'var(--chat-bubble-text)', whiteSpace: 'pre-wrap' }}>{msg.text}</span>
+                  </div>
                 </div>
               )}
             </div>
@@ -278,13 +342,30 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
 
       {/* Input area wrapper — relative for pending-images overlay */}
       <div style={{ position: 'relative', borderTop: '1px solid var(--border-color)', backgroundColor: 'rgba(255,255,255,0.03)', flexShrink: 0 }}>
-        {/* Pending images: floating on top of input area, shadow, no background bar */}
-        {pendingImages.length > 0 && (
+        {/* Pending images and videos: floating on top of input area, shadow, no background bar */}
+        {(pendingImages.length > 0 || pendingVideos.length > 0) && (
           <div style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, padding: '8px 14px 6px', display: 'flex', flexWrap: 'wrap', gap: '6px', pointerEvents: 'auto' }}>
             {pendingImages.map((img, idx) => (
-              <div key={idx} style={{ position: 'relative', width: '52px', height: '52px', flexShrink: 0, filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.25))' }}>
+              <div key={`img-${idx}`} style={{ position: 'relative', width: '52px', height: '52px', flexShrink: 0, filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.25))' }}>
                 <img src={`data:${img.mimeType};base64,${img.data}`} alt="" style={{ width: '100%', height: '100%', borderRadius: '6px', objectFit: 'cover', display: 'block' }} />
                 <button onClick={() => removeImage(idx)} style={{
+                  position: 'absolute', top: '-4px', right: '-4px', width: '16px', height: '16px', borderRadius: '50%',
+                  backgroundColor: 'rgba(150, 150, 150, 0.65)', color: 'rgba(255,255,255,0.85)',
+                  border: 'none', fontSize: '11px', lineHeight: 1, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+                }}>×</button>
+              </div>
+            ))}
+            {pendingVideos.map((video, idx) => (
+              <div key={`video-${idx}`} style={{ position: 'relative', width: '52px', height: '52px', flexShrink: 0, filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.25))' }}>
+                <img src={`data:image/jpeg;base64,${video.thumbnail}`} alt="Video thumbnail" style={{ width: '100%', height: '100%', borderRadius: '6px', objectFit: 'cover', display: 'block' }} />
+                {/* 视频播放图标叠加 */}
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: '6px' }}>
+                  <svg viewBox="0 0 24 24" fill="white" stroke="none" width="16" height="16">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                  </svg>
+                </div>
+                <button onClick={() => removeVideo(idx)} style={{
                   position: 'absolute', top: '-4px', right: '-4px', width: '16px', height: '16px', borderRadius: '50%',
                   backgroundColor: 'rgba(150, 150, 150, 0.65)', color: 'rgba(255,255,255,0.85)',
                   border: 'none', fontSize: '11px', lineHeight: 1, cursor: 'pointer',
@@ -296,6 +377,47 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
         )}
 
         <form ref={formRef} onSubmit={handleSubmit} onPaste={handlePaste}
+          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+          onDrop={async (e) => {
+            e.preventDefault();
+            const files = Array.from(e.dataTransfer.files);
+
+            // 处理视频文件，读取首帧作为预览，不填入输入框
+            const videoFiles = files.filter(file => file.type.startsWith('video/'));
+            if (videoFiles.length > 0) {
+              const newVideos: VideoAttachment[] = [];
+              for (const file of videoFiles) {
+                try {
+                  const videoAttachment = await getVideoThumbnail(file);
+                  newVideos.push(videoAttachment);
+                } catch { /* skip */ }
+              }
+              if (newVideos.length > 0) {
+                setPendingVideos([...pendingVideos, ...newVideos]);
+              }
+            }
+
+            // 处理图片文件，保持原有逻辑
+            const imageFiles = files.filter(file => file.type.startsWith('image/'));
+            if (imageFiles.length > 0) {
+              const images: ImageAttachment[] = [];
+              for (const file of imageFiles) {
+                try { images.push(await readFileAsImage(file)); } catch { /* skip */ }
+              }
+              if (images.length > 0) {
+                onPendingImagesChange([...pendingImages, ...images]);
+              }
+            }
+
+            // 移动光标到输入框末尾
+            setTimeout(() => {
+              if (inputRef.current) {
+                const len = inputRef.current.value.length;
+                inputRef.current.setSelectionRange(len, len);
+                inputRef.current.focus();
+              }
+            }, 0);
+          }}
           style={{ display: 'flex', alignItems: 'flex-start', padding: '6px 12px 6px 8px', gap: '4px' }}>
           {/* Attachment button */}
           <button type="button" onClick={handleSelectFile} disabled={isThinking}

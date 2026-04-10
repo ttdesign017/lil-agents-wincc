@@ -5,10 +5,16 @@ export interface ImageAttachment {
   data: string; // base64
 }
 
+export interface VideoAttachment {
+  path: string;
+  thumbnail: string; // base64 首帧图片
+}
+
 export interface Message {
   type: 'output' | 'error' | 'user' | 'thinking';
   text: string;
   images?: ImageAttachment[];
+  videos?: VideoAttachment[];
 }
 
 export function useClaudeSession(name: string) {
@@ -94,15 +100,27 @@ export function useClaudeSession(name: string) {
     };
   }, [name]); // chatLimitWarned read via functional updater, no need in deps
 
-  const handleSubmitMessage = useCallback((text: string, images?: ImageAttachment[]) => {
-    setChatHistory(prev => [...prev, { type: 'user', text, images: images && images.length > 0 ? images : undefined }]);
+  const handleSubmitMessage = useCallback((text: string, images?: ImageAttachment[], videos?: VideoAttachment[]) => {
+    // 把视频路径拼到文本前面
+    let finalText = text;
+    if (videos && videos.length > 0) {
+      const videoPaths = videos.map(v => `"${v.path}"`).join(' ');
+      finalText = videoPaths + (finalText ? ' ' + finalText : '');
+    }
+
+    setChatHistory(prev => [...prev, {
+      type: 'user',
+      text, // 界面只显示用户输入的提示词，不显示路径
+      images: images && images.length > 0 ? images : undefined,
+      videos: videos && videos.length > 0 ? videos : undefined
+    }]);
     setIsThinking(true);
     setHasUnread(false);
     if ((window as any).electronAPI) {
       if (images && images.length > 0) {
-        (window as any).electronAPI.sendClaudeInput(name, { text, images });
+        (window as any).electronAPI.sendClaudeInput(name, { text: finalText, images });
       } else {
-        (window as any).electronAPI.sendClaudeInput(name, text);
+        (window as any).electronAPI.sendClaudeInput(name, finalText);
       }
     }
   }, [name]);
