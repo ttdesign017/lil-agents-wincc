@@ -85,7 +85,7 @@ function createWindow() {
     resizable: false,
     type: 'toolbar',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.mjs'),
+      preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -201,15 +201,24 @@ ipcMain.handle('select-image', async () => {
   if (result.canceled || result.filePaths.length === 0) return [];
 
   const images: Array<{ mimeType: string; data: string }> = [];
+  const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+
   for (const filePath of result.filePaths) {
     try {
+      // Check file size before reading
+      const stats = await fs.promises.stat(filePath);
+      if (stats.size > MAX_FILE_SIZE) {
+        console.error(`[select-image] File too large: ${filePath} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
+        continue;
+      }
+
       const ext = filePath.split('.').pop()?.toLowerCase();
       const mimeTypeMap: Record<string, string> = {
         png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
         gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
       };
       const mimeType = mimeTypeMap[ext || ''] || 'image/png';
-      const fileBuffer = fs.readFileSync(filePath);
+      const fileBuffer = await fs.promises.readFile(filePath);
       const base64 = fileBuffer.toString('base64');
       images.push({ mimeType, data: base64 });
     } catch (e) {

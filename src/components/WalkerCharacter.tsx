@@ -81,6 +81,7 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
 
   // Animation state
   const rafRef = useRef(0);
+  const animationCleanupRef = useRef<(() => void) | null>(null);
   const animPhaseRef = useRef<Phase>('idle');
   const animFrameRef = useRef(0);
   const lastAnimTimeRef = useRef(0);
@@ -110,9 +111,11 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
 
   // ── Load sprite image ──
   useEffect(() => {
+    let mounted = true;
     const img = new Image();
     img.src = sprite;
     img.onload = () => {
+      if (!mounted) return;
       imgRef.current = img;
       imageReadyRef.current = true;
       // Paint initial idle frame
@@ -130,8 +133,20 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
       );
       animFrameRef.current = cfg.startMin;
     };
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [sprite]);
+    return () => {
+      mounted = false;
+      animationCleanupRef.current?.();
+      animationCleanupRef.current = null;
+    };
+  }, [sprite, cfg]);
+
+  // ── Unified cleanup on unmount ──
+  useEffect(() => {
+    return () => {
+      animationCleanupRef.current?.();
+      animationCleanupRef.current = null;
+    };
+  }, []);
 
   // ── Canvas frame renderer ──
   const renderFrame = useCallback((frame: number) => {
@@ -255,9 +270,18 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
     rafRef.current = requestAnimationFrame(animTick);
   }, [cfg, renderFrame, updateDOMPosition, taskbarInfo.dockWidth]);
 
+  // ── Unified animation starter: cleans up old rAF before starting new ──
+  const startAnimation = useCallback(() => {
+    animationCleanupRef.current?.();
+    animationCleanupRef.current = null;
+    rafRef.current = requestAnimationFrame(animTick);
+    animationCleanupRef.current = () => cancelAnimationFrame(rafRef.current);
+  }, [animTick]);
+
   // ── Start walk ──
   const startWalk = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
+    animationCleanupRef.current?.();
+    animationCleanupRef.current = null;
     gracefulExitRef.current = false;
     animPhaseRef.current = 'start';
     animFrameRef.current = cfg.startMin;
@@ -265,8 +289,8 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
     loopCountDoneRef.current = 0;
     lastAnimTimeRef.current = 0;
     renderFrame(animFrameRef.current);
-    rafRef.current = requestAnimationFrame(animTick);
-  }, [cfg, animTick, renderFrame]);
+    startAnimation();
+  }, [cfg, renderFrame, startAnimation]);
 
   // ── Stop ──
   const stopWalk = useCallback(() => {
@@ -297,7 +321,10 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
     } else if (!isAnimating && animPhaseRef.current !== 'idle' && !gracefulExitRef.current) {
       stopWalk();
     }
-    return () => cancelAnimationFrame(rafRef.current);
+    return () => {
+      animationCleanupRef.current?.();
+      animationCleanupRef.current = null;
+    };
   }, [isAnimating, startWalk, stopWalk]);
 
   // ── Track character screen position for popover ──

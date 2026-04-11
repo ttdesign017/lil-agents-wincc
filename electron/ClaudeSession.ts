@@ -23,12 +23,11 @@ const MAX_SESSIONS = 2;
 const sessions = new Map<string, ClaudeState>();
 
 // Resolve the claude CLI path directly to bypass PowerShell wrapper issues
-function getClaudeCliPath(): string {
+function getClaudeCliPath(): { mode: 'global'; path: string } | { mode: 'npx' } {
   const appData = process.env.APPDATA || '';
   const globalPath = path.join(appData, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
-  // Fallback: try npx resolution if global install not found
-  if (!fs.existsSync(globalPath)) return 'cli.js';
-  return globalPath;
+  if (fs.existsSync(globalPath)) return { mode: 'global', path: globalPath };
+  return { mode: 'npx' };
 }
 
 // Find template CLAUDE.md with multiple fallback locations
@@ -128,14 +127,11 @@ export function setupClaudeSession(mainWindow: Electron.BrowserWindow) {
       }
     }
 
-    const cliPath = getClaudeCliPath();
-    const currentSession = spawn('node', [
-      cliPath,
-      '--output-format', 'stream-json',
-      '--input-format', 'stream-json',
-      '--verbose',
-      '--dangerously-skip-permissions'
-    ], {
+    const cliInfo = getClaudeCliPath();
+    const cliArgs = cliInfo.mode === 'npx'
+      ? ['@anthropic-ai/claude-code', '--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose', '--dangerously-skip-permissions']
+      : [cliInfo.path, '--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'];
+    const currentSession = spawn('node', cliArgs, {
       cwd: personaDir,
       env: {
         ...process.env,
