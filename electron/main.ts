@@ -8,6 +8,29 @@ import { setupClaudeSession } from './ClaudeSession';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Debug log file path
+const debugLogPath = path.join(app.getPath('userData'), 'walker-debug.log');
+let debugLogStream: fs.WriteStream | null = null;
+
+// Initialize debug log file
+function initDebugLog() {
+  try {
+    debugLogStream = fs.createWriteStream(debugLogPath, { flags: 'w' });
+    debugLogStream.write(`=== Walker Debug Log Started at ${new Date().toISOString()} ===\n`);
+    console.log(`[DEBUG] Log file initialized at: ${debugLogPath}`);
+  } catch (err) {
+    console.error('[DEBUG] Failed to initialize log file:', err);
+  }
+}
+
+// Write to debug log
+function writeDebugLog(message: string) {
+  if (debugLogStream) {
+    const timestamp = new Date().toISOString();
+    debugLogStream.write(`[${timestamp}] ${message}\n`);
+  }
+}
+
 // Enable hardware acceleration for performance (GPU will handle transparency and blurs)
 // Only disable if transparency issues occur on specific drivers.
 
@@ -106,6 +129,56 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
+  // Inject debug analyzer script
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    
+    // Inject the debug analyzer
+    const debugScript = `
+      (function() {
+        // Setup debug log collector
+        if (!window.__walkerDebugLogs) {
+          window.__walkerDebugLogs = {};
+        }
+        
+        // Override console.log to capture debug logs
+        const originalConsoleLog = console.log;
+        console.log = function(...args) {
+          originalConsoleLog.apply(console, args);
+          
+          // Capture WalkerCharacter debug logs
+          const msg = args.join(' ');
+          if (msg.includes('[DEBUG-')) {
+            const match = msg.match(/\\[DEBUG-([^\\]]+)\\]/);
+            if (match) {
+              const charName = match[1];
+              if (!window.__walkerDebugLogs[charName]) {
+                window.__walkerDebugLogs[charName] = [];
+              }
+              window.__walkerDebugLogs[charName].push(msg);
+              
+              // Send to main process for file logging
+              if (window.electronAPI && window.electronAPI.logDebug) {
+                window.electronAPI.logDebug(charName, msg);
+              }
+            }
+          }
+        };
+        
+        console.log('[DEBUG] Walker debug log collector initialized');
+      })();
+    `;
+    
+    mainWindow.webContents.executeJavaScript(debugScript).catch(err => {
+      console.error('[DEBUG] Failed to inject debug script:', err);
+    });
+  });
+
+  // Collect debug logs from renderer
+  ipcMain.on('debug-log', (_event, charName: string, message: string) => {
+    writeDebugLog(`[${charName}] ${message}`);
+  });
+
   // Security: Prevent in-app navigation to remote sites
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
       shell.openExternal(url);
@@ -123,11 +196,34 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  initDebugLog();
   createWindow();
   createTray();
   if (mainWindow) {
     setupClaudeSession(mainWindow);
   }
+
+  // Export debug logs handler
+  ipcMain.handle('export-debug-logs', async () => {
+    if (!debugLogStream) {
+      return { success: false, error: 'Debug log not initialized' };
+    }
+    
+    // Close the stream to flush all data
+    debugLogStream.end();
+    debugLogStream = null;
+    
+    try {
+      const stats = fs.statSync(debugLogPath);
+      return { 
+        success: true, 
+        path: debugLogPath,
+        size: stats.size 
+      };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
 
   // #12: Listen for display change event after app is ready
   screen.on('display-metrics-changed', (_event, _display, _changedMetrics) => {
