@@ -1,8 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  setIgnoreMouseEvents: (ignore: boolean, options?: { forward?: boolean }) => 
+  setIgnoreMouseEvents: (ignore: boolean, options?: { forward?: boolean }) =>
     ipcRenderer.send('set-ignore-mouse-events', ignore, options),
+  getCursorPos: () => ipcRenderer.invoke('get-cursor-pos'),
   getTaskbarInfo: () => ipcRenderer.invoke('get-taskbar-info'),
   startClaude: (sessionId: string) => ipcRenderer.send('start-claude', sessionId),
   sendClaudeInput: (sessionId: string, input: string | { text: string; images?: Array<{ mimeType: string; data: string }> }) => ipcRenderer.send('send-claude-input', sessionId, input),

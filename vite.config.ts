@@ -11,9 +11,29 @@ export default defineConfig({
     electron({
       main: {
         entry: 'electron/main.ts',
+        vite: {
+          build: {
+            rollupOptions: {
+              output: {
+                entryFileNames: '[name].js',
+                chunkFileNames: '[name].js',
+              },
+            },
+          },
+        },
       },
       preload: {
         input: path.join(__dirname, 'electron/preload.ts'),
+        vite: {
+          build: {
+            rollupOptions: {
+              output: {
+                entryFileNames: '[name].js',
+                chunkFileNames: '[name].js',
+              },
+            },
+          },
+        },
       },
       renderer: {},
     }),

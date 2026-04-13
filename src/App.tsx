@@ -66,7 +66,9 @@ function App() {
     width: '100%',
     height: '100%',
     position: 'relative',
-    pointerEvents: 'none'
+    // Note: pointerEvents must be 'auto' for child elements (characters) to receive mouse events.
+    // The click-through is handled by Electron's setIgnoreMouseEvents and controlled dynamically.
+    pointerEvents: 'auto'
   };
 
   return (

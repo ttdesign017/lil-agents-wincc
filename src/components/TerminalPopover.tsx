@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, forwardRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -42,11 +42,11 @@ interface TerminalPopoverProps {
   onPendingImagesChange: (images: ImageAttachment[]) => void;
 }
 
-const TerminalPopover: React.FC<TerminalPopoverProps> = ({
+const TerminalPopover = forwardRef<HTMLDivElement, TerminalPopoverProps>(({
   onClose, name, history, isThinking, onSubmitMessage, onClearHistory,
   popoverScreenX, characterScreenY, onPopoverMouseEnter, onPopoverMouseLeave,
   inputText, onInputTextChange, pendingImages, onPendingImagesChange,
-}) => {
+}, ref) => {
   const endOfLogRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -233,9 +233,13 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
     );
   };
 
+  // Don't render until position is valid (prevents flash at 0,0)
+  if (popoverScreenX === 0 && characterScreenY === 0) return null;
+
   return (
     <div
-      style={{ position: 'fixed', top: Math.max(20, characterScreenY - 340), left: popoverScreenX, transform: 'translateX(-50%)',
+      ref={ref}
+      style={{ position: 'fixed', transform: 'translateX(-50%)',
         width: '420px', maxWidth: '90vw', height: '320px', backgroundColor: 'var(--bg-color)', backdropFilter: 'blur(var(--bg-blur))',
         borderRadius: '14px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column',
         boxShadow: 'var(--shadow)', pointerEvents: 'auto', overflow: 'hidden', zIndex: 10000, ['--user-color' as string]: userColor,
@@ -447,6 +451,8 @@ const TerminalPopover: React.FC<TerminalPopoverProps> = ({
       <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
     </div>
   );
-};
+});
+
+TerminalPopover.displayName = 'TerminalPopover';
 
 export default TerminalPopover;

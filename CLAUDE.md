@@ -28,7 +28,7 @@ npm run build        # tsc + vite build + electron-builder (produces dist-build/
 
 ### Electron Main/Renderer Separation
 
-- **electron/main.ts** — Creates a transparent, borderless, always-on-top fullscreen window at screen-saver z-level (`type: 'toolbar'`) with `setIgnoreMouseEvents(true, { forward: true })` for click-through. System tray provides menus for per-character visibility toggle (绿油油/刘小红), themes (neon/corporate/toxic), and quit. The default theme (`neon`) starts as checked (checkbox) in the tray submenu.
+- **electron/main.ts** — Creates a transparent, borderless, always-on-top fullscreen window at screen-saver z-level (`type: 'toolbar'`) with `setIgnoreMouseEvents(true, { forward: true })` for click-through. System tray provides menus for per-character visibility toggle (绿油油/刘小红), themes (neon/corporate/toxic), and quit. The default theme (`neon`) starts as checked (checkbox) in the tray submenu. IPC handlers: `set-ignore-mouse-events` (dynamic click-through toggle), `get-cursor-pos` (screen coordinates for hover detection).
 - **electron/preload.ts** — Context-isolated bridge exposing `Window.electronAPI` for IPC: mouse forwarding, taskbar info, Claude session management (start/send/kill), visibility/themes, display changes, external URL opening.
 - **electron/ClaudeSession.ts** — Spawns `node cli.js --output-format stream-json --input-format stream-json --verbose --dangerously-skip-permissions` per persona. Resolves CLI path from global npm or local. Finds template CLAUDE.md from packaged resources. Atomic copy to session data dir. Parses JSON lines from stdout, extracts `assistant` messages and `result` turn-complete events. Session limit: MAX_SESSIONS=2 (oldest killed if exceeded). Stdout line buffering for partial reads. Stderr filtered to real errors only.
 
@@ -47,7 +47,10 @@ npm run build        # tsc + vite build + electron-builder (produces dist-build/
   - `effectiveYOffset`: combined prop `yOffset` + config `cfg.yOffset` for per-character vertical offset.
   - END phase: no position snap-back on completion; position reflects accumulated movement.
   - Shared: drag-to-reposition (pauses animation), hover pause/tooltip, click-to-toggle chat popover, unread badge, graceful walk finish on hover (`gracefulEndWalk`).
-- **src/components/TerminalPopover.tsx** — Chat UI via `createPortal`. `position: fixed` panel attached to character. Markdown rendering via `react-markdown` + `remark-gfm`. Auto-scroll to bottom. Ctrl+click links to open in browser. Textarea auto-resize up to 120px. `/clear` command clears history. Thinking indicator in title bar. Popover position captured synchronously before opening to prevent initial rendering at wrong position.
+  - **Hover detection**: Polls OS cursor position (`getCursorPos`) every 100ms, converts `getBoundingClientRect()` client coords to screen coords via `window.screenX/Y`, then uses `document.elementFromPoint()` to ensure only the topmost overlapping character responds. This prevents multiple characters from responding when they overlap.
+  - **Drag ownership**: Uses unique `dragIdRef` per character + shared `activeDragIdRef` to ensure only one character can be dragged at a time when overlapping.
+  - **Position stability**: `dockWidthRef` cached with 0-value guard to prevent position jumps during React re-renders.
+- **src/components/TerminalPopover.tsx** — Chat UI via `createPortal`. `position: fixed` panel attached to character. Markdown rendering via `react-markdown` + `remark-gfm`. Auto-scroll to bottom. Ctrl+click links to open in browser. Textarea auto-resize up to 120px. `/clear` command clears history. Thinking indicator in title bar. Uses `forwardRef` so parent can directly manipulate DOM position. Position updates every rAF frame via direct `style.left/top` manipulation (zero-lag tracking during character movement).
 - **src/components/SpriteAnimator.tsx** — rAF-based canvas sprite animator with multi-row support. Used by ArtDebugger.
 - **src/components/ArtDebugger.tsx** — Dev tool (accessible via `?debug=art`). Sprite sheet preview, walk preview stage, per-character controls (frame count, cycle speed, scale, walkProb). "Apply to Code" POSTs to Vite `/__patch` middleware to live-patch constants in WalkerCharacter.tsx. Imports `CHAR_CONFIGS` and `DEFAULT_SCALE` from shared config.
 - **src/hooks/useClaudeSession.ts** — Custom hook managing Claude IPC communication. State: `chatHistory` (max 200 messages, capacity warning at 195), `isThinking`, `hasUnread`. Starts session on mount, cleans up listeners on unmount. `maxHistoryMessages` is configurable (default: 200).
@@ -77,6 +80,28 @@ Three CSS themes via custom properties in `src/index.css`: `theme-neon` (default
 - **Stale Closure Pattern**: Use refs (`progressRef`, `goingRightRef`, `animPhaseRef`) inside rAF callbacks — never capture React state in closures.
 - **Ref Sync Pattern**: State → ref sync via `useEffect(() => { ref.current = state; }, [state])`.
 - **Time-Based Movement**: Position scales by `elapsed / FRAME_DURATION_MS` ratio, enabling smooth sub-frame interpolation across variable rAF rates (~60fps).
+
+### Click-Through & Hover Detection
+
+The app uses `setIgnoreMouseEvents(true, { forward: true })` to let clicks pass through to the desktop. Hover detection works by:
+1. Polling OS cursor position via `ipcRenderer.invoke('get-cursor-pos')` every 100ms
+2. Converting `getBoundingClientRect()` client coords to screen coords (`+ window.screenX/Y`)
+3. Using `document.elementFromPoint()` to verify the topmost element under cursor
+4. Toggling `setIgnoreMouseEvents(false/true)` based on whether cursor is over a character
+
+This ensures overlapping characters don't both respond — only the one whose DOM element is actually topmost at the cursor coordinates.
+
+### Popover Position Tracking
+
+Popover position is updated every rAF frame via **direct DOM manipulation** (`popoverEl.style.left/top`), bypassing React state updates entirely. The parent component holds a ref to the popover DOM element (via `forwardRef`) and updates position in a `useLayoutEffect` + rAF loop. This eliminates the ~16ms React render cycle lag and ensures zero-delay tracking during character movement.
+
+### Drag Ownership
+
+When characters overlap, both may report `mouseOverCharacterRef.current = true`. To prevent simultaneous dragging:
+- Each character has a unique `dragIdRef`
+- A shared `activeDragIdRef` tracks which character "owns" the current drag
+- `mousedown` claims ownership: `activeDragIdRef.current = dragIdRef.current`
+- `mousemove`/`mouseup` only respond if `activeDragIdRef.current === dragIdRef.current`
 
 ## Project Structure
 
