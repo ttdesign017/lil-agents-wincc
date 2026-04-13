@@ -56,7 +56,7 @@ lil-agents-wincc/
 采用基于时间步长（Time-based）的位置插值算法，确保角色在不同刷新率的屏幕上都能保持一致的移动速度。动画逻辑由一套完整的状态机驱动：从启动阶段（START）的平滑加速，到循环行走阶段（LOOP），再到结束阶段（END）的减速停止，实现了极其自然的行走体验。
 
 ### 点击穿透覆盖层
-通过创建一个无边框、置顶的全屏窗口，并设置 `setIgnoreMouseEvents(pointer-events: none)`，实现了完整的桌面穿透效果。只有当鼠标点击到角色 DOM 节点或聊天气泡时，才会捕获事件。
+通过创建一个无边框、置顶的全屏窗口，并设置 `setIgnoreMouseEvents(true, { forward: true })`，实现了完整的桌面穿透效果。通过轮询 OS 光标位置并结合 `document.elementFromPoint()` 精确检测鼠标何时悬停在角色上，动态启用/禁用鼠标穿透。这确保了即使角色重叠时，也只有最顶层的角色响应点击和拖拽。
 
 ### Claude IPC 通信
 使用 Node.js `child_process` 启动本地 `@anthropic-ai/claude-code` 子进程，并通过流式 I/O 进行通信。解析 `--output-format stream-json` 以实现实时的 Token 流式输出。即使 UI 被最小化，角色依然可以持续“思考”并响应。
