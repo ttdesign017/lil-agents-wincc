@@ -34,7 +34,7 @@ npm run build        # tsc + vite build + electron-builder (produces dist-build/
 
 ### React Renderer
 
-- **src/main.tsx** — React root entry; conditional `?debug=art` route loads ArtDebugger via dynamic import.
+- **src/main.tsx** — React root entry point.
 - **src/App.tsx** — Scene manager: coordinates 2 `WalkerCharacter` instances (绿油油 + 刘小红) + theme. Handles IPC visibility toggles, theme changes, display metrics changes. Theme class applied to `document.documentElement` for proper cascade to `createPortal` elements. Theme sync applied via `useEffect` on theme state change.
 - **src/config.ts** — **Shared configuration file**. All motion parameters (BASE_STEP, FRAME_DURATION_MS, boundaries, walk distances, delays), tooltip/popover timing, and per-character sprite configs (CHAR_CONFIGS) live here. `DEFAULT_SCALE` also defined. Character configs include `yOffset` for per-character Y-axis offset.
 - **src/components/WalkerCharacter.tsx** — Core game logic. **Unified canvas rAF** for both characters via `CHAR_CONFIGS` map from config.ts (frameWidth, frameHeight, scale, cols, walkProb, yOffset, phase frame ranges).
@@ -51,8 +51,6 @@ npm run build        # tsc + vite build + electron-builder (produces dist-build/
   - **Drag ownership**: Uses unique `dragIdRef` per character + shared `activeDragIdRef` to ensure only one character can be dragged at a time when overlapping.
   - **Position stability**: `dockWidthRef` cached with 0-value guard to prevent position jumps during React re-renders.
 - **src/components/TerminalPopover.tsx** — Chat UI via `createPortal`. `position: fixed` panel attached to character. Markdown rendering via `react-markdown` + `remark-gfm`. Auto-scroll to bottom. Ctrl+click links to open in browser. Textarea auto-resize up to 120px. `/clear` command clears history. Thinking indicator in title bar. Uses `forwardRef` so parent can directly manipulate DOM position. Position updates every rAF frame via direct `style.left/top` manipulation (zero-lag tracking during character movement).
-- **src/components/SpriteAnimator.tsx** — rAF-based canvas sprite animator with multi-row support. Used by ArtDebugger.
-- **src/components/ArtDebugger.tsx** — Dev tool (accessible via `?debug=art`). Sprite sheet preview, walk preview stage, per-character controls (frame count, cycle speed, scale, walkProb). "Apply to Code" POSTs to Vite `/__patch` middleware to live-patch constants in WalkerCharacter.tsx. Imports `CHAR_CONFIGS` and `DEFAULT_SCALE` from shared config.
 - **src/hooks/useClaudeSession.ts** — Custom hook managing Claude IPC communication. State: `chatHistory` (max 200 messages, capacity warning at 195), `isThinking`, `hasUnread`. Starts session on mount, cleans up listeners on unmount. `maxHistoryMessages` is configurable (default: 200).
 
 ### Canvas rAF Animation
@@ -76,7 +74,6 @@ Three CSS themes via custom properties in `src/index.css`: `theme-neon` (default
 - **Claude Subprocess**: One session per character, persistent across UI state.
 - **Performance**: Direct DOM manipulation for positioning (CSS transforms + rAF), not React state-driven re-renders.
 - **Personas**: `personas/` directory contains CLAUDE.md files per character. Bundled as `extraResources` in electron-builder config.
-- **Vite `__patch` Middleware**: Custom `debugger-patch` middleware exposes POST `/__patch` for live-patching `CHAR_CONFIGS` entries (scale, walkProb) in WalkerCharacter.tsx source.
 - **Stale Closure Pattern**: Use refs (`progressRef`, `goingRightRef`, `animPhaseRef`) inside rAF callbacks — never capture React state in closures.
 - **Ref Sync Pattern**: State → ref sync via `useEffect(() => { ref.current = state; }, [state])`.
 - **Time-Based Movement**: Position scales by `elapsed / FRAME_DURATION_MS` ratio, enabling smooth sub-frame interpolation across variable rAF rates (~60fps).
@@ -113,22 +110,21 @@ When characters overlap, both may report `mouseOverCharacterRef.current = true`.
 │   ├── preload.ts                # Context bridge
 │   └── ClaudeSession.ts          # Claude subprocess lifecycle
 ├── src/                          # Renderer (React/TypeScript)
-│   ├── main.tsx                  # React entry (?debug=art → ArtDebugger)
+│   ├── main.tsx                  # React entry point
 │   ├── App.tsx                   # Scene manager
 │   ├── config.ts                 # All motion/sprite parameters + per-character configs
 │   ├── index.css                 # Styles + themes
 │   ├── components/
 │   │   ├── WalkerCharacter.tsx   # Core character (canvas rAF walk engine, unified)
 │   │   ├── TerminalPopover.tsx   # Chat UI (markdown rendering, createPortal)
-│   │   ├── SpriteAnimator.tsx    # rAF canvas animator (multi-row)
-│   │   └── ArtDebugger.tsx       # Dev tool (?debug=art, hot-patch parameters)
+│   │   └── SpriteAnimator.tsx    # rAF canvas animator (multi-row)
 │   └── hooks/
 │       └── useClaudeSession.ts   # Claude IPC hook
 ├── public/assets/                # Sprite sheets (bruce.png, jazz.png, bruce2.png, jazz3.png)
 ├── personas/                     # AI personality profiles (CLAUDE.md per character)
 │   ├── 刘小红/CLAUDE.md
 │   └── 绿油油/CLAUDE.md
-├── vite.config.ts                # Vite + Electron + debugger-patch middleware
+├── vite.config.ts                # Vite + Electron
 ├── package.json
 ├── tsconfig.json
 ├── build.bat / run.bat           # Windows helper scripts

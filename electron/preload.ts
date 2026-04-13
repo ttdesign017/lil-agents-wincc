@@ -46,6 +46,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url: string) => ipcRenderer.send('open-external', url),
   selectImage: () => ipcRenderer.invoke('select-image'),
   exportChat: (filename: string, content: string) => ipcRenderer.invoke('export-chat', filename, content),
-  logDebug: (charName: string, message: string) => ipcRenderer.send('debug-log', charName, message),
-  exportDebugLogs: () => ipcRenderer.invoke('export-debug-logs'),
 });

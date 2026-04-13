@@ -57,44 +57,6 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
   if (!cfg) throw new Error(`No sprite config for character "${name}"`);
   const effectiveYOffset = yOffset + (cfg.yOffset ?? 0);
 
-  // Debug: Create a log file writer
-  const debugLogRef = useRef<{
-    logs: string[];
-    startTime: number;
-  }>({ logs: [], startTime: Date.now() });
-
-  const addDebugLog = useCallback((message: string) => {
-    const timestamp = ((Date.now() - debugLogRef.current.startTime) / 1000).toFixed(3);
-    const logEntry = `[${timestamp}s] ${message}`;
-    debugLogRef.current.logs.push(logEntry);
-    console.log(`[DEBUG-${name}]`, logEntry);
-    
-    // Store in global object
-    if (!(window as any).__walkerDebugLogs) {
-      (window as any).__walkerDebugLogs = {};
-    }
-    if (!(window as any).__walkerDebugLogs[name]) {
-      (window as any).__walkerDebugLogs[name] = [];
-    }
-    (window as any).__walkerDebugLogs[name].push(logEntry);
-    
-    // Save to localStorage for persistence
-    try {
-      localStorage.setItem('__walkerDebugLogs', JSON.stringify((window as any).__walkerDebugLogs));
-    } catch (err) {
-      // Ignore localStorage errors
-    }
-    
-    // Direct call to electronAPI - write to file immediately
-    try {
-      if ((window as any).electronAPI && (window as any).electronAPI.logDebug) {
-        (window as any).electronAPI.logDebug(name, logEntry);
-      }
-    } catch (err) {
-      // Silently fail if electronAPI not available
-    }
-  }, [name]);
-
   const progressRef = useRef(initialProgress);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -177,7 +139,6 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
       if (!mounted) return;
       imgRef.current = img;
       imageReadyRef.current = true;
-      addDebugLog('Sprite image loaded');
       // Paint initial idle frame
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -198,80 +159,15 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
       animationCleanupRef.current?.();
       animationCleanupRef.current = null;
     };
-  }, [sprite, cfg, addDebugLog]);
-
-  // ── Debug: Keyboard shortcut to export logs ──
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+Shift+D: Export logs to file
-      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
-        e.preventDefault();
-        const allLogs = (window as any).__walkerDebugLogs || {};
-        const logText = Object.entries(allLogs).map(([charName, logs]) => {
-          return `=== ${charName} ===\n${(logs as string[]).join('\n')}`;
-        }).join('\n\n');
-        
-        const blob = new Blob([logText], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `walker-debug-${Date.now()}.txt`;
-        a.click();
-        URL.revokeObjectURL(url);
-        console.log('[DEBUG] Logs exported to file');
-      }
-      
-      // Ctrl+Shift+E: Export via electronAPI (if available)
-      if (e.ctrlKey && e.shiftKey && e.key === 'E') {
-        e.preventDefault();
-        if ((window as any).electronAPI?.exportDebugLogs) {
-          (window as any).electronAPI.exportDebugLogs().then((result: any) => {
-            if (result.success) {
-              alert(`日志已导出到:\n${result.path}\n\n大小: ${result.size} 字节`);
-            } else {
-              alert(`导出失败: ${result.error}`);
-            }
-          }).catch((err: any) => {
-            alert(`导出失败: ${err}`);
-          });
-        } else {
-          alert('electronAPI 不可用,请使用 Ctrl+Shift+D');
-        }
-      }
-      
-      // Ctrl+Shift+L: Log current status to console
-      if (e.ctrlKey && e.shiftKey && e.key === 'L') {
-        e.preventDefault();
-        const allLogs = (window as any).__walkerDebugLogs || {};
-        console.log('=== Current Debug Logs ===');
-        console.log('Characters:', Object.keys(allLogs));
-        Object.entries(allLogs).forEach(([charName, logs]) => {
-          console.log(`\n[${charName}] ${(logs as string[]).length} entries:`);
-          (logs as string[]).forEach(log => console.log(`  ${log}`));
-        });
-        console.log('=== End Debug Logs ===');
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [sprite, cfg]);
 
   // ── Unified cleanup on unmount ──
   useEffect(() => {
     return () => {
-      // Export debug logs on unmount
-      if ((window as any).electronAPI?.exportDebugLogs) {
-        (window as any).electronAPI.exportDebugLogs().then((result: any) => {
-          if (result.success) {
-            console.log(`[DEBUG] Logs exported to: ${result.path} (${result.size} bytes)`);
-          }
-        }).catch(err => {
-          console.error('[DEBUG] Failed to export logs:', err);
-        });
-      }
-      
       animationCleanupRef.current?.();
       animationCleanupRef.current = null;
+      // Restore text selection on unmount
+      document.body.style.userSelect = '';
     };
   }, []);
 
@@ -320,11 +216,6 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
     const direction = goingRightRef.current ? 1 : -1;
     const baseStep = BASE_STEP / (dockWidthRef.current || 1920);
 
-    // Debug: Log rAF timing
-    if (phase === 'end') {
-      addDebugLog(`rAF tick: phase=${phase}, elapsed=${elapsed.toFixed(2)}ms, time=${time.toFixed(0)}, frame=${animFrameRef.current}`);
-    }
-
     // Position always updates every rAF for smooth interpolation
     if (!isDraggingRef.current && phase !== 'idle') {
       const endFrames = cfg.endMax - cfg.endMin + 1;
@@ -349,7 +240,6 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
           loopCountDoneRef.current = 0;
           animFrameRef.current = cfg.endMin;
           animPhaseRef.current = 'end';
-          addDebugLog(`=== Transition to END phase === progress=${progressRef.current.toFixed(4)}, frame=${animFrameRef.current}, time=${time.toFixed(0)}`);
           if (nearEdge) {
             goingRightRef.current = !goingRightRef.current;
             setGoingRight(goingRightRef.current);
@@ -364,10 +254,6 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
         const prevProgress = progressRef.current;
         progressRef.current += baseStep * direction * easeCoeff * elapsed / FRAME_DURATION_MS;
         progressRef.current = Math.max(PROGRESS_MIN, Math.min(PROGRESS_MAX, progressRef.current));
-        const delta = progressRef.current - prevProgress;
-
-        // Debug log for every end phase frame
-        addDebugLog(`END phase: frame=${animFrameRef.current}/${cfg.endMax}, elapsed=${elapsed.toFixed(2)}ms, easeCoeff=${easeCoeff.toFixed(3)}, delta=${delta.toFixed(6)}, progress=${progressRef.current.toFixed(4)}, time=${time.toFixed(0)}`);
       }
       updateDOMPosition();
     }
@@ -394,7 +280,6 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
             walkStartP.current = progressRef.current;
             animFrameRef.current = cfg.endMin;
             animPhaseRef.current = 'end';
-            addDebugLog(`=== Transition from LOOP to END === progress=${progressRef.current.toFixed(4)}, endMin=${cfg.endMin}, time=${time.toFixed(0)}`);
           }
         }
         renderFrame(animFrameRef.current);
@@ -403,7 +288,6 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
         const arrived = animFrameRef.current > cfg.endMax;
         if (arrived) {
           // position already reflects END phase movement; no snap-back needed
-          addDebugLog(`=== END phase complete === final progress=${progressRef.current.toFixed(4)}, walkEndP=${walkEndP.current.toFixed(4)}, time=${time.toFixed(0)}`);
           animPhaseRef.current = 'idle';
           setIsAnimating(false);
         } else {
@@ -434,7 +318,6 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
     loopCountDoneRef.current = 0;
     lastAnimTimeRef.current = 0;
     renderFrame(animFrameRef.current);
-    addDebugLog(`=== Start walk === loopCountTarget=${loopCountTargetRef.current}, startMin=${cfg.startMin}`);
     startAnimation();
   }, [cfg, renderFrame, startAnimation]);
 
@@ -457,7 +340,6 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
       loopCountDoneRef.current = 0;
       animFrameRef.current = cfg.endMin;
       animPhaseRef.current = 'end';
-      addDebugLog(`=== Graceful end walk initiated === progress=${progressRef.current.toFixed(4)}, endMin=${cfg.endMin}, endFrames=${endFrames}`);
     }
   }, [cfg.endMin]);
 
@@ -738,16 +620,20 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
       isDraggingRef.current = true;
       setIsPaused(true);
       dragState.current = { startX: e.clientX, startProgress: progressRef.current, hasDragged: false };
+      // Disable text selection during drag
+      document.body.style.userSelect = 'none';
     };
 
     const onMouseUp = (e: MouseEvent) => {
       // Only respond if THIS character is the one being dragged
       if (activeDragIdRef.current !== dragIdRef.current) return;
-      
+
       const wasDragging = dragState.current.hasDragged;
       isDraggingRef.current = false;
       activeDragIdRef.current = null;
       setDragPositionState(null);
+      // Restore text selection
+      document.body.style.userSelect = '';
 
       if (!wasDragging) {
         handleClick();
