@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import TerminalPopover from './TerminalPopover';
 import { useClaudeSession, ImageAttachment } from '../hooks/useClaudeSession';
@@ -78,6 +78,23 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
   const [popoverY, setPopoverY] = useState(0);
   const [inputText, setInputText] = useState('');
   const [pendingImages, setPendingImages] = useState<ImageAttachment[]>([]);
+  
+  // Track when popover was last closed to delay walk resumption
+  const popoverCloseTimeRef = useRef(0);
+  
+  // Unique drag ID to identify which character is being dragged
+  // Prevents multiple characters from being dragged simultaneously when overlapping
+  const dragIdRef = useRef<string>(`${name}-${Math.random().toString(36).slice(2)}`);
+  const activeDragIdRef = useRef<string | null>(null);
+
+  // Refs for values accessed in rAF loop (avoid stale closures)
+  const dockWidthRef = useRef(taskbarInfo.dockWidth);
+  // Only update ref with valid values (prevent 0 from propagating)
+  useEffect(() => { 
+    if (taskbarInfo.dockWidth > 0) {
+      dockWidthRef.current = taskbarInfo.dockWidth; 
+    }
+  }, [taskbarInfo.dockWidth]);
 
   // Animation state
   const rafRef = useRef(0);
@@ -101,8 +118,12 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
 
   const updateMouseIgnore = useCallback(() => {
     const shouldIgnore = !mouseOverCharacterRef.current && !mouseOverPopoverRef.current;
-    if ((window as any).electronAPI) {
-      (window as any).electronAPI.setIgnoreMouseEvents(shouldIgnore, { forward: true });
+    const electronAPI = (window as any).electronAPI;
+    if (!electronAPI) return;
+    if (shouldIgnore) {
+      electronAPI.setIgnoreMouseEvents(true, { forward: true });
+    } else {
+      electronAPI.setIgnoreMouseEvents(false);
     }
   }, []);
 
@@ -166,12 +187,16 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
   }, [cfg.cols, cfg.frameWidth, cfg.frameHeight]);
 
   // ── Position update (direct DOM transform, no CSS transition) ──
+  // Always use dockWidthRef.current (more stable than prop during re-renders)
   const updateDOMPosition = useCallback(() => {
     if (!containerRef.current) return;
-    const x = progressRef.current * (taskbarInfo.dockWidth || 1920);
+    const effectiveDockWidth = dockWidthRef.current || 1920;
+    const x = progressRef.current * effectiveDockWidth;
+    // The window is fullscreen, so window.innerHeight equals the screen height.
+    // Character sits at the bottom of the screen (above the taskbar via yOffset).
     containerRef.current.style.transition = 'none';
     containerRef.current.style.transform = `translate3d(${x}px, ${window.innerHeight - displayH + effectiveYOffset}px, 0)`;
-  }, [taskbarInfo.dockWidth, yOffset, displayH]);
+  }, [effectiveYOffset, displayH]);
 
   useEffect(() => { updateDOMPosition(); }, [updateDOMPosition, taskbarInfo.dockWidth, taskbarInfo.dockTopY]);
 
@@ -182,11 +207,12 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
   // ── rAF loop: frames + eased position ──
   const animTick = useCallback((time: number) => {
     if (lastAnimTimeRef.current === 0) lastAnimTimeRef.current = time;
-    const elapsed = time - lastAnimTimeRef.current;
+    // Clamp elapsed to prevent huge jumps after background tab throttling
+    const elapsed = Math.min(time - lastAnimTimeRef.current, 200);
 
     const phase = animPhaseRef.current;
     const direction = goingRightRef.current ? 1 : -1;
-    const baseStep = BASE_STEP / (taskbarInfo.dockWidth || 1920);
+    const baseStep = BASE_STEP / (dockWidthRef.current || 1920);
 
     // Position always updates every rAF for smooth interpolation
     if (!isDraggingRef.current && phase !== 'idle') {
@@ -268,7 +294,7 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
     }
 
     rafRef.current = requestAnimationFrame(animTick);
-  }, [cfg, renderFrame, updateDOMPosition, taskbarInfo.dockWidth]);
+  }, [cfg, renderFrame, updateDOMPosition]);
 
   // ── Unified animation starter: cleans up old rAF before starting new ──
   const startAnimation = useCallback(() => {
@@ -328,23 +354,33 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
   }, [isAnimating, startWalk, stopWalk]);
 
   // ── Track character screen position for popover ──
-  useEffect(() => {
+  // Directly manipulate popover DOM element position on every rAF frame
+  // This eliminates React state update lag and ensures zero-delay tracking
+  const popoverDomRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
     if (!isPopoverOpen) return;
-    // Immediately sync position before first render of popover
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (rect) {
-      setPopoverX(Math.floor(rect.left + rect.width / 2));
-      setPopoverY(Math.floor(rect.top));
-    }
+
+    const popoverEl = popoverDomRef.current;
+    if (!popoverEl) return;
+
+    // Use rAF for direct DOM position updates - zero lag
+    let rafId: number;
+
     const update = () => {
       const r = containerRef.current?.getBoundingClientRect();
       if (r) {
-        setPopoverX(Math.floor(r.left + r.width / 2));
-        setPopoverY(Math.floor(r.top));
+        const newX = r.left + r.width / 2;
+        const newY = r.top;
+        // Direct DOM manipulation - no React state, no re-render lag
+        popoverEl.style.left = `${newX}px`;
+        popoverEl.style.top = `${Math.max(20, newY - 340)}px`;
       }
+      rafId = requestAnimationFrame(update);
     };
-    const id = setInterval(update, POPOVER_TRACK_INTERVAL);
-    return () => clearInterval(id);
+
+    rafId = requestAnimationFrame(update);
+    return () => cancelAnimationFrame(rafId);
   }, [isPopoverOpen]);
 
   // ── Personality / idle engine ──
@@ -361,6 +397,15 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
       if (gracefulExitRef.current) gracefulExitRef.current = false;
       if (isPaused) {
         timeoutId = setTimeout(planNextAction, PAUSED_CHECK_INTERVAL);
+        return;
+      }
+      
+      // Delay walk resumption after popover close to prevent jump
+      const timeSincePopoverClose = Date.now() - popoverCloseTimeRef.current;
+      const MIN_DELAY_AFTER_POPOVER_CLOSE = 500; // 0.5 seconds - short delay to let rendering settle
+      if (timeSincePopoverClose < MIN_DELAY_AFTER_POPOVER_CLOSE) {
+        const remainingDelay = MIN_DELAY_AFTER_POPOVER_CLOSE - timeSincePopoverClose;
+        timeoutId = setTimeout(planNextAction, remainingDelay);
         return;
       }
 
@@ -426,100 +471,179 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
     }
   }, [taskbarInfo.dockWidth, taskbarInfo.dockTopY, cfg.endMin]);
 
-  // ── Drag ──
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    isDraggingRef.current = true;
-    setIsPaused(true);
-    dragState.current = { startX: e.clientX, startProgress: progressRef.current, hasDragged: false };
-  };
+  // ── Click handler (stable via ref-based reads) ──
+  const handleClick = useCallback(() => {
+    // Only respond if the mouse is actually over THIS character instance
+    if (!mouseOverCharacterRef.current) return;
 
+    if (!showPopoverRef.current) {
+      // Gracefully end walk: let animation transition to end phase and stop smoothly
+      if (animPhaseRef.current !== 'idle') {
+        gracefulEndWalk();
+      }
+      setIsPaused(true);
+      setHasUnread(false);
+      
+      // Get current position and set it BEFORE opening popover
+      // This prevents the popover from rendering at (0,0) initially
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) {
+        const popoverX = Math.floor(rect.left + rect.width / 2);
+        const popoverY = Math.floor(rect.top);
+        setPopoverX(popoverX);
+        setPopoverY(popoverY);
+      }
+      
+      // Wait for next frame to ensure position state is applied before popover opens
+      requestAnimationFrame(() => {
+        setIsPopoverOpen(true);
+        setShowPopover(true);
+      });
+    } else {
+      // Close popover first
+      setShowPopover(false);
+      setIsPopoverOpen(false);
+      // Record close time to delay walk resumption
+      popoverCloseTimeRef.current = Date.now();
+      // Resume idle behavior
+      setIsPaused(false);
+    }
+  }, []);
+
+  // ── OS cursor position polling for hover detection ──
+  // setIgnoreMouseEvents(true, {forward: true}) sends ALL mouse events through
+  // to the window beneath in Z-order — the page receives nothing.
+  // Solution: poll the real OS cursor position from main process, detect when
+  // it's over the character, then disable ignore mode so DOM events fire normally.
   useEffect(() => {
-    const onMove = (e: PointerEvent) => {
-      if (!isDraggingRef.current) return;
-      const dx = e.clientX - dragState.current.startX;
-      if (Math.abs(dx) > 3) dragState.current.hasDragged = true;
-      let np = dragState.current.startProgress + dx / (taskbarInfo.dockWidth || 1);
-      np = Math.max(SAFE_BOUNDARY_MIN, Math.min(SAFE_BOUNDARY_MAX, isNaN(np) ? progressRef.current : np));
-      progressRef.current = np;
-      updateDOMPosition();
-      if (showPopover) setDragPositionState(np);
+    const electronAPI = (window as any).electronAPI;
+    if (!electronAPI) return;
+
+    const checkCursor = async () => {
+      if (isDraggingRef.current) return;
+
+      try {
+        const pos = await electronAPI.getCursorPos();
+        const el = containerRef.current;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+
+        // Convert client coordinates to screen coordinates.
+        // getBoundingClientRect() returns coordinates relative to the viewport,
+        // but screen.getCursorScreenPoint() returns absolute screen coordinates.
+        // We must add the window's screen offset to get comparable coordinates.
+        const screenX = rect.left + window.screenX;
+        const screenY = rect.top + window.screenY;
+        const screenRight = rect.right + window.screenX;
+        const screenBottom = rect.bottom + window.screenY;
+
+        const isOverRect = pos.x >= screenX && pos.x <= screenRight &&
+                           pos.y >= screenY && pos.y <= screenBottom;
+
+        // When characters overlap, use elementFromPoint to ensure only the topmost character responds
+        // This is the key fix for overlapping characters
+        const isTopmost = isOverRect ? (() => {
+          // Check if the character's canvas/div is actually under the cursor
+          // elementFromPoint returns the topmost element at given coordinates
+          const topEl = document.elementFromPoint(pos.x - window.screenX, pos.y - window.screenY);
+          if (!topEl) return false;
+          // Check if the topEl is this character or a child of this character
+          return el === topEl || el.contains(topEl);
+        })() : false;
+
+        if (isTopmost && !mouseOverCharacterRef.current) {
+          mouseOverCharacterRef.current = true;
+          // Disable click-through so DOM events (mousedown/click/move) fire normally
+          electronAPI.setIgnoreMouseEvents(false);
+          setShowTooltip(true);
+          if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+          tooltipTimerRef.current = setTimeout(() => setShowTooltip(false), TOOLTIP_DISPLAY_MS);
+          if (animPhaseRef.current !== 'idle') {
+            gracefulEndWalk();
+          } else {
+            setIsPaused(true);
+          }
+        } else if (!isTopmost && mouseOverCharacterRef.current) {
+          mouseOverCharacterRef.current = false;
+          gracefulExitRef.current = false;
+          if (!showPopoverRef.current) {
+            setIsPaused(false);
+            // Re-enable click-through when not over character and popover is closed
+            if (!mouseOverPopoverRef.current) {
+              electronAPI.setIgnoreMouseEvents(true, { forward: true });
+            }
+          }
+          setShowTooltip(false);
+          if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+        }
+      } catch { /* ignore */ }
     };
 
-    const onUp = (e: PointerEvent) => {
-      if (!isDraggingRef.current) return;
+    const id = setInterval(checkCursor, 100);
+    return () => clearInterval(id);
+  }, [gracefulEndWalk]);
+
+  // ── Mouse events (only fire when ignore mode is disabled, i.e. cursor is over character) ──
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      // Only respond if THIS character is the one being dragged
+      if (activeDragIdRef.current !== dragIdRef.current) return;
+
+      // Track drag distance
+      if (isDraggingRef.current) {
+        const dx = Math.abs(e.clientX - dragState.current.startX);
+        if (dx > 3) dragState.current.hasDragged = true;
+        // Update character position during drag
+        const delta = e.clientX - dragState.current.startX;
+        let np = dragState.current.startProgress + delta / (dockWidthRef.current || 1920);
+        np = Math.max(SAFE_BOUNDARY_MIN, Math.min(SAFE_BOUNDARY_MAX, isNaN(np) ? progressRef.current : np));
+        progressRef.current = np;
+        updateDOMPosition();
+        if (showPopoverRef.current) setDragPositionState(np);
+      }
+
+      // Update tooltip timer on movement
+      if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = setTimeout(() => setShowTooltip(false), TOOLTIP_DISPLAY_MS);
+    };
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      // Only start drag if mouse is over THIS character instance
+      if (!mouseOverCharacterRef.current) return;
+      // Claim the drag - prevent other overlapping characters from dragging
+      activeDragIdRef.current = dragIdRef.current;
+      // Start drag
+      isDraggingRef.current = true;
+      setIsPaused(true);
+      dragState.current = { startX: e.clientX, startProgress: progressRef.current, hasDragged: false };
+    };
+
+    const onMouseUp = (e: MouseEvent) => {
+      // Only respond if THIS character is the one being dragged
+      if (activeDragIdRef.current !== dragIdRef.current) return;
+      
       const wasDragging = dragState.current.hasDragged;
       isDraggingRef.current = false;
+      activeDragIdRef.current = null;
       setDragPositionState(null);
 
       if (!wasDragging) {
         handleClick();
-      } else if (!popoverRef.current) {
+      } else if (!showPopoverRef.current) {
         setIsPaused(false);
-        // After drag, check if pointer is over character element.
-        // Use the unscaled container rect (getBoundingClientRect already returns scaled rect).
-        const rect = containerRef.current?.getBoundingClientRect();
-        if (rect) {
-          const inside = e.clientX >= rect.left && e.clientX <= rect.right &&
-            e.clientY >= rect.top && e.clientY <= rect.bottom;
-          if (!inside) {
-            mouseOverCharacterRef.current = false;
-            updateMouseIgnore();
-          }
-        }
       }
     };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mouseup', onMouseUp);
     return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [taskbarInfo.dockWidth, updateDOMPosition, popoverRef, showPopover]);
-
-  const handleClick = () => {
-    if (!showPopover) {
-      setIsPaused(true);
-      setHasUnread(false);
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (rect) {
-        setPopoverX(Math.floor(rect.left + rect.width / 2));
-        setPopoverY(Math.floor(rect.top));
-      }
-      setIsPopoverOpen(true);
-      setShowPopover(true);
-    } else {
-      setIsPaused(false);
-      setShowPopover(false);
-      setIsPopoverOpen(false);
-    }
-  };
-
-  // ── Mouse enter / leave ──
-  const handleMouseEnter = () => {
-    if (isDraggingRef.current) return;
-    mouseOverCharacterRef.current = true;
-    updateMouseIgnore();
-    setShowTooltip(true);
-    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
-    tooltipTimerRef.current = setTimeout(() => setShowTooltip(false), TOOLTIP_DISPLAY_MS);
-    if (animPhaseRef.current !== 'idle') {
-      gracefulEndWalk();
-    } else {
-      setIsPaused(true);
-    }
-  };
-
-  const handleMouseLeave = () => {
-    if (isDraggingRef.current) return;
-    mouseOverCharacterRef.current = false;
-    updateMouseIgnore();
-    gracefulExitRef.current = false;
-    if (!showPopover) setIsPaused(false);
-    setShowTooltip(false);
-    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
-  };
+  }, [handleClick]);
 
   return (
     <>
@@ -540,9 +664,6 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
       >
         <div
           style={{ width: '100%', height: '100%', transform: `scaleX(${goingRight ? 1 : -1})`, position: 'relative' }}
-          onMouseEnter={handleMouseEnter}
-          onMouseLeave={handleMouseLeave}
-          onPointerDown={handlePointerDown}
         >
           <canvas
             ref={canvasRef}
@@ -575,6 +696,7 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
 
         {isPopoverOpen && createPortal(
           <TerminalPopover
+            ref={popoverDomRef}
             name={name}
             history={chatHistory}
             isThinking={isThinking}
@@ -587,11 +709,18 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
               setIsPaused(false);
               setIsPopoverOpen(false);
               setDragPositionState(null);
+              setPendingImages([]);
               mouseOverPopoverRef.current = false;
               updateMouseIgnore();
             }}
-            onPopoverMouseEnter={() => { mouseOverPopoverRef.current = true; updateMouseIgnore(); }}
-            onPopoverMouseLeave={() => { mouseOverPopoverRef.current = false; updateMouseIgnore(); }}
+            onPopoverMouseEnter={() => { mouseOverPopoverRef.current = true; }}
+            onPopoverMouseLeave={() => {
+              mouseOverPopoverRef.current = false;
+              // If also not over character, re-enable click-through
+              if (!mouseOverCharacterRef.current && (window as any).electronAPI) {
+                (window as any).electronAPI.setIgnoreMouseEvents(true, { forward: true });
+              }
+            }}
             inputText={inputText}
             onInputTextChange={setInputText}
             pendingImages={pendingImages}

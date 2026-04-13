@@ -102,6 +102,8 @@ function createWindow() {
   // Load the UI
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
+    // Open DevTools for debugging
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
@@ -113,11 +115,17 @@ function createWindow() {
     });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    // Only allow navigating to our own local app
+    // Only allow navigating to our own local app (file:// protocol)
+    // Use case-insensitive check and block all non-file protocols (data:, blob:, about:, etc.)
+    const lowerUrl = url.toLowerCase();
+    const isLocalFile = lowerUrl.startsWith('file://');
     const currentUrl = mainWindow?.webContents.getURL();
-    if (currentUrl && url !== currentUrl && !url.startsWith('file://')) {
+    if (currentUrl && url !== currentUrl) {
       event.preventDefault();
-      shell.openExternal(url);
+      // Only open external URLs in the system browser (block file:// from being opened locally)
+      if (!isLocalFile) {
+        shell.openExternal(url);
+      }
     }
   });
 }
@@ -154,10 +162,16 @@ app.on('window-all-closed', () => {
 // The renderer tells the main process if the mouse is over an interactive element (e.g. character)
 ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
   const win = BrowserWindow.fromWebContents(event.sender);
-  if (win) {
+  if (win && !win.isDestroyed()) {
+    console.log(`[setIgnoreMouseEvents] ignore=${ignore} options=${JSON.stringify(options)}`);
     win.setIgnoreMouseEvents(ignore, options);
+  } else {
+    console.log(`[setIgnoreMouseEvents] Window not available or destroyed`);
   }
 });
+
+// Get OS cursor position (screen coordinates)
+ipcMain.handle('get-cursor-pos', () => screen.getCursorScreenPoint());
 
 // Taskbar position for primary display
 ipcMain.handle('get-taskbar-info', () => {
@@ -165,15 +179,12 @@ ipcMain.handle('get-taskbar-info', () => {
   const workArea = display.workArea;
   const bounds = display.bounds;
 
-  let dockTopY = bounds.height - (bounds.height - workArea.height);
-  if (workArea.y > bounds.y) {
-    dockTopY = workArea.y;
-  }
-
+  // workArea.y already represents the top of the usable area (accounts for top-positioned taskbar)
+  // workArea.y + workArea.height is the bottom of the usable area
   return {
     dockX: bounds.x,
     dockWidth: bounds.width,
-    dockTopY: dockTopY,
+    dockTopY: workArea.y + workArea.height, // bottom of work area = taskbar top Y for bottom taskbar
     screenWidth: bounds.width
   };
 });
@@ -186,17 +197,25 @@ ipcMain.on('open-external', (_event, url) => {
 ipcMain.handle('select-image', async () => {
   // The mainWindow is an alwaysOnTop toolbar window that covers the entire screen.
   // We must temporarily lower its Z-level so the dialog is visible.
-  if (!mainWindow) return [];
+  if (!mainWindow || mainWindow.isDestroyed()) return [];
 
   // Lower the window Z-level so the dialog can appear on top
   mainWindow.setAlwaysOnTop(false);
   // Add small delay to ensure Windows processes the Z-order change
   await new Promise(resolve => setTimeout(resolve, 100));
+
+  // Check if window was destroyed while waiting
+  if (!mainWindow || mainWindow.isDestroyed()) return [];
+
   const result = await dialog.showOpenDialog({
     properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }],
   });
-  mainWindow.setAlwaysOnTop(true, 'screen-saver');
+
+  // Restore window Z-order
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setAlwaysOnTop(true, 'screen-saver');
+  }
 
   if (result.canceled || result.filePaths.length === 0) return [];
 
@@ -230,17 +249,25 @@ ipcMain.handle('select-image', async () => {
 
 // Export: save chat history to a markdown file
 ipcMain.handle('export-chat', async (_event, filename: string, content: string) => {
-  if (!mainWindow) return false;
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
 
   // Lower the window Z-level so the dialog can appear on top
   mainWindow.setAlwaysOnTop(false);
   // Add small delay to ensure Windows processes the Z-order change
   await new Promise(resolve => setTimeout(resolve, 100));
+
+  // Check if window was destroyed while waiting
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+
   const result = await dialog.showSaveDialog({
     defaultPath: filename,
     filters: [{ name: 'Markdown', extensions: ['md'] }],
   });
-  mainWindow.setAlwaysOnTop(true, 'screen-saver');
+
+  // Restore window Z-order
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setAlwaysOnTop(true, 'screen-saver');
+  }
 
   if (result.canceled || !result.filePath) return false;
 
