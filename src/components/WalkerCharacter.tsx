@@ -3,6 +3,13 @@ import { createPortal } from 'react-dom';
 import TerminalPopover from './TerminalPopover';
 import { useClaudeSession, ImageAttachment } from '../hooks/useClaudeSession';
 import {
+  registerCharacterOver,
+  unregisterCharacterOver,
+  registerPopoverOver,
+  unregisterPopoverOver,
+  subscribe as subscribeMouseState,
+} from '../utils/mouseStateManager';
+import {
   CHAR_CONFIGS,
   CharSpriteConfig,
   BASE_STEP,
@@ -113,19 +120,7 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
 
   // ── Centralized mouse-ignore state machine ──
   const mouseOverCharacterRef = useRef(false);
-  const mouseOverPopoverRef = useRef(false);
   const showPopoverRef = useRef(showPopover);
-
-  const updateMouseIgnore = useCallback(() => {
-    const shouldIgnore = !mouseOverCharacterRef.current && !mouseOverPopoverRef.current;
-    const electronAPI = (window as any).electronAPI;
-    if (!electronAPI) return;
-    if (shouldIgnore) {
-      electronAPI.setIgnoreMouseEvents(true, { forward: true });
-    } else {
-      electronAPI.setIgnoreMouseEvents(false);
-    }
-  }, []);
 
   const displayW = Math.round(cfg.frameWidth * cfg.scale);
   const displayH = Math.round(cfg.frameHeight * cfg.scale);
@@ -170,6 +165,16 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
       document.body.style.userSelect = '';
     };
   }, []);
+
+  // ── Register character with global mouse state manager on mount/unmount ──
+  useEffect(() => {
+    // Register on mount (character is not being hovered yet)
+    // The checkCursor loop will update registration based on actual hover state
+    return () => {
+      // Unregister when component unmounts
+      unregisterCharacterOver(name);
+    };
+  }, [name]);
 
   // ── Canvas frame renderer ──
   const renderFrame = useCallback((frame: number) => {
@@ -556,8 +561,8 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
 
         if (isTopmost && !mouseOverCharacterRef.current) {
           mouseOverCharacterRef.current = true;
-          // Disable click-through so DOM events (mousedown/click/move) fire normally
-          electronAPI.setIgnoreMouseEvents(false);
+          // Use global state manager to disable click-through
+          registerCharacterOver(name);
           setShowTooltip(true);
           if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
           tooltipTimerRef.current = setTimeout(() => setShowTooltip(false), TOOLTIP_DISPLAY_MS);
@@ -569,12 +574,10 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
         } else if (!isTopmost && mouseOverCharacterRef.current) {
           mouseOverCharacterRef.current = false;
           gracefulExitRef.current = false;
+          // Use global state manager to re-enable click-through
+          unregisterCharacterOver(name);
           if (!showPopoverRef.current) {
             setIsPaused(false);
-            // Re-enable click-through when not over character and popover is closed
-            if (!mouseOverPopoverRef.current) {
-              electronAPI.setIgnoreMouseEvents(true, { forward: true });
-            }
           }
           setShowTooltip(false);
           if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
@@ -717,16 +720,11 @@ const WalkerCharacter: React.FC<WalkerProps> = ({
               setIsPopoverOpen(false);
               setDragPositionState(null);
               setPendingImages([]);
-              mouseOverPopoverRef.current = false;
-              updateMouseIgnore();
+              unregisterPopoverOver(name);
             }}
-            onPopoverMouseEnter={() => { mouseOverPopoverRef.current = true; }}
+            onPopoverMouseEnter={() => { registerPopoverOver(name); }}
             onPopoverMouseLeave={() => {
-              mouseOverPopoverRef.current = false;
-              // If also not over character, re-enable click-through
-              if (!mouseOverCharacterRef.current && (window as any).electronAPI) {
-                (window as any).electronAPI.setIgnoreMouseEvents(true, { forward: true });
-              }
+              unregisterPopoverOver(name);
             }}
             inputText={inputText}
             onInputTextChange={setInputText}

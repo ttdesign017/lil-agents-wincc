@@ -94,7 +94,6 @@ export function setupClaudeSession(mainWindow: Electron.BrowserWindow) {
         }
       }
       if (oldestId) {
-        console.warn(`[ClaudeSession] Max sessions (${MAX_SESSIONS}) exceeded, killing oldest session: ${oldestId}`);
         const oldestState = sessions.get(oldestId);
         if (oldestState) {
           oldestState.process.kill();

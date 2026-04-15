@@ -102,6 +102,7 @@ function createWindow() {
   // Load the UI
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
+    // DevTools: manually open via Ctrl+Shift+I or mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }

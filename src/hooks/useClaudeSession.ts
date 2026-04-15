@@ -26,22 +26,23 @@ export function useClaudeSession(name: string) {
   const [isThinking, setIsThinking] = useState(false);
   const [hasUnread, setHasUnread] = useState(false);
   const popoverRef = useRef(false);
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // IPC listeners for Claude
   useEffect(() => {
     if (!(window as any).electronAPI) return;
     (window as any).electronAPI.startClaude(name);
 
-    let chunkBuffer = '';
     const flushChunk = (chunk: string) => {
       if (!chunk) return;
       setChatHistory(prev => {
         let updated = [...prev];
-        if (updated.length > 0 && updated[updated.length - 1].type === 'output') {
-          const last = updated[updated.length - 1];
-          updated[updated.length - 1] = { ...last, text: last.text + (last.text ? '\n' : '') + chunk };
+        const lastIndex = updated.length - 1;
+        if (lastIndex >= 0 && updated[lastIndex].type === 'output') {
+          // Append to existing output message (streaming)
+          const last = updated[lastIndex];
+          updated[lastIndex] = { ...last, text: last.text + chunk };
         } else {
+          // Create new output message
           updated.push({ type: 'output', text: chunk });
         }
         if (updated.length > 180 && !chatLimitWarnedRef.current) {
@@ -57,17 +58,8 @@ export function useClaudeSession(name: string) {
     };
 
     const offData = (window as any).electronAPI.onClaudeData(name, (data: string) => {
-      chunkBuffer += data;
-      const idx = chunkBuffer.lastIndexOf('\n');
-      if (idx !== -1) {
-        const complete = chunkBuffer.slice(0, idx);
-        chunkBuffer = chunkBuffer.slice(idx + 1);
-        flushChunk(complete);
-      }
-      if (chunkBuffer) {
-        clearTimeout(debounceTimerRef.current as any);
-        debounceTimerRef.current = setTimeout(() => { flushChunk(chunkBuffer); chunkBuffer = ''; }, 200);
-      }
+      // Directly flush each IPC message (already line-separated from main process)
+      flushChunk(data);
     });
 
     const offError = (window as any).electronAPI.onClaudeError(name, (data: string) => {
@@ -96,7 +88,6 @@ export function useClaudeSession(name: string) {
 
     return () => {
       offData(); offError(); offExit(); offTurn?.();
-      clearTimeout(debounceTimerRef.current as any);
     };
   }, [name]); // chatLimitWarned read via functional updater, no need in deps
 
