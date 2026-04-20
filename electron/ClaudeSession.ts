@@ -25,8 +25,9 @@ const sessions = new Map<string, ClaudeState>();
 // Resolve the claude CLI path directly to bypass PowerShell wrapper issues
 function getClaudeCliPath(): { mode: 'global'; path: string } | { mode: 'npx' } {
   const appData = process.env.APPDATA || '';
-  const globalPath = path.join(appData, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
-  if (fs.existsSync(globalPath)) return { mode: 'global', path: globalPath };
+  // v2.1.114 uses cli-wrapper.cjs (no cli.js anymore)
+  const globalWrapper = path.join(appData, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli-wrapper.cjs');
+  if (fs.existsSync(globalWrapper)) return { mode: 'global', path: globalWrapper };
   return { mode: 'npx' };
 }
 
