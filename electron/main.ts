@@ -2,20 +2,21 @@ import { app, BrowserWindow, dialog, ipcMain, screen, Tray, Menu, nativeImage, s
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { setupClaudeSession } from './ClaudeSession';
+import { setupLMStudioSession } from './LMStudioSession';
 
 // ESM __dirname equivalent
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Enable hardware acceleration for performance (GPU will handle transparency and blurs)
-// Only disable if transparency issues occur on specific drivers.
+// 让 Chromium 启用平滑滚动（鼠标滚轮过渡更丝滑）
+app.commandLine.appendSwitch('enable-smooth-scrolling');
 
-let mainWindow: BrowserWindow | null = null;
+const rendererWindows: BrowserWindow[] = [];
 let tray: Tray | null = null;
+let trayContextMenu: Menu | null = null;
+let suppressKeepOnTop = false;
 
 function createTray() {
-  // Use the icon we bundled in the build folder
   const iconPath = path.join(app.getAppPath(), 'build/icon.png');
   const icon = nativeImage.createFromPath(iconPath);
   tray = new Tray(icon.resize({ width: 16, height: 16 }));
@@ -26,7 +27,7 @@ function createTray() {
       type: 'checkbox', 
       checked: true,
       click: (item) => {
-        mainWindow?.webContents.send('toggle-visibility', '绿油油', item.checked);
+        broadcastToAll('toggle-visibility', '绿油油', item.checked);
       }
     },
     { 
@@ -34,7 +35,7 @@ function createTray() {
       type: 'checkbox', 
       checked: true,
       click: (item) => {
-        mainWindow?.webContents.send('toggle-visibility', '刘小红', item.checked);
+        broadcastToAll('toggle-visibility', '刘小红', item.checked);
       }
     },
     { type: 'separator' },
@@ -45,18 +46,23 @@ function createTray() {
           label: 'Neon-Noodle',
           type: 'radio',
           checked: false,
-          click: () => mainWindow?.webContents.send('set-app-theme', 'neon')
+          click: () => broadcastToAll('set-app-theme', 'neon')
         },
         {
           label: 'Corporate-Overlord (Default)',
           type: 'radio',
           checked: true,
-          click: () => mainWindow?.webContents.send('set-app-theme', 'corporate')
+          click: () => broadcastToAll('set-app-theme', 'corporate')
         },
         { 
           label: 'Toxic-Greenhouse', 
           type: 'radio', 
-          click: () => mainWindow?.webContents.send('set-app-theme', 'toxic') 
+          click: () => broadcastToAll('set-app-theme', 'toxic') 
+        },
+        { 
+          label: 'Glass-Frosted', 
+          type: 'radio', 
+          click: () => broadcastToAll('set-app-theme', 'glass') 
         }
       ]
     },
@@ -66,24 +72,38 @@ function createTray() {
 
   tray.setToolTip('Lil-Agents');
   tray.setContextMenu(contextMenu);
+  trayContextMenu = contextMenu;
 }
 
-function createWindow() {
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const screenBounds = primaryDisplay.bounds;
+function setTrayVisibilityChecked(name: string, visible: boolean) {
+  if (!trayContextMenu) return;
+  const item = trayContextMenu.items.find(
+    (m) => m.type === 'checkbox' && typeof m.label === 'string' && m.label.includes(name)
+  );
+  if (item) item.checked = visible;
+  if (tray) tray.setContextMenu(trayContextMenu);
+}
 
-  mainWindow = new BrowserWindow({
-    x: screenBounds.x,
-    y: screenBounds.y,
-    width: screenBounds.width,
-    height: screenBounds.height,
+function broadcastToAll(channel: string, ...args: any[]) {
+  for (const win of rendererWindows) {
+    if (!win.isDestroyed()) {
+      win.webContents.send(channel, ...args);
+    }
+  }
+}
+
+function createDisplayWindow(display: Electron.Display, displayIndex: number): BrowserWindow {
+  const win = new BrowserWindow({
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width: display.bounds.width,
+    height: display.bounds.height,
     transparent: true,
     frame: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     hasShadow: false,
     resizable: false,
-    type: 'toolbar',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -91,62 +111,96 @@ function createWindow() {
     },
   });
 
-  mainWindow.setAlwaysOnTop(true, 'screen-saver');
-  mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.setIgnoreMouseEvents(true, { forward: true });
+  win.setHasShadow(false);
 
-  // Enable click-through by default
-  mainWindow.setIgnoreMouseEvents(true, { forward: true });
-  // Ensure pointer events are forwarded through the transparent area
-  mainWindow.setHasShadow(false);
+  const params = new URLSearchParams({ displayIndex: String(displayIndex) });
+  const baseUrl = process.env.VITE_DEV_SERVER_URL;
 
-  // Load the UI
-  if (process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-    // DevTools: manually open via Ctrl+Shift+I or mainWindow.webContents.openDevTools()
+  if (baseUrl) {
+    win.loadURL(`${baseUrl}?${params.toString()}`);
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    win.loadFile(path.join(__dirname, '../dist/index.html'), {
+      query: { displayIndex: String(displayIndex) },
+    });
   }
 
-  // Security: Prevent in-app navigation to remote sites
-    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-      shell.openExternal(url);
-      return { action: 'deny' };
-    });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
 
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    // Only allow navigating to our own local app (file:// protocol)
-    // Use case-insensitive check and block all non-file protocols (data:, blob:, about:, etc.)
+  win.webContents.on('will-navigate', (event, url) => {
     const lowerUrl = url.toLowerCase();
     const isLocalFile = lowerUrl.startsWith('file://');
-    const currentUrl = mainWindow?.webContents.getURL();
+    const currentUrl = win.webContents.getURL();
     if (currentUrl && url !== currentUrl) {
       event.preventDefault();
-      // Only open external URLs in the system browser (block file:// from being opened locally)
       if (!isLocalFile) {
         shell.openExternal(url);
       }
     }
   });
+
+  win.on('closed', () => {
+    const idx = rendererWindows.indexOf(win);
+    if (idx >= 0) rendererWindows.splice(idx, 1);
+  });
+
+  return win;
+}
+
+function createAllWindows() {
+  const displays = screen.getAllDisplays();
+  for (let i = 0; i < displays.length; i++) {
+    const win = createDisplayWindow(displays[i], i);
+    rendererWindows.push(win);
+  }
+
+  const keepOnTop = setInterval(() => {
+    for (const win of rendererWindows) {
+      if (win.isDestroyed()) continue;
+      if (suppressKeepOnTop) continue;
+      win.setAlwaysOnTop(true, 'screen-saver');
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    }
+    if (rendererWindows.every(w => w.isDestroyed())) {
+      clearInterval(keepOnTop);
+    }
+  }, 2000);
+
+  for (const win of rendererWindows) {
+    win.on('blur', () => {
+      if (suppressKeepOnTop) return;
+      if (win.isDestroyed()) return;
+      win.setAlwaysOnTop(true, 'screen-saver');
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    });
+  }
 }
 
 app.whenReady().then(() => {
-  createWindow();
+  createAllWindows();
   createTray();
-  if (mainWindow) {
-    setupClaudeSession(mainWindow);
-  }
 
-  // #12: Listen for display change event after app is ready
-  screen.on('display-metrics-changed', (_event, _display, _changedMetrics) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      // Re-fetch primary display info and notify renderer
-      mainWindow.webContents.send('display-metrics-changed');
+  setupLMStudioSession(broadcastToAll);
+
+  screen.on('display-metrics-changed', () => {
+    for (const win of [...rendererWindows]) {
+      if (!win.isDestroyed()) {
+        win.close();
+      }
     }
+    rendererWindows.length = 0;
+    createAllWindows();
+    broadcastToAll('display-metrics-changed');
   });
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+    if (rendererWindows.length === 0) {
+      createAllWindows();
     }
   });
 });
@@ -169,19 +223,48 @@ ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
 // Get OS cursor position (screen coordinates)
 ipcMain.handle('get-cursor-pos', () => screen.getCursorScreenPoint());
 
-// Taskbar position for primary display
+// Taskbar & display info for all connected monitors (supports multi-screen walking)
 ipcMain.handle('get-taskbar-info', () => {
-  const display = screen.getPrimaryDisplay();
-  const workArea = display.workArea;
-  const bounds = display.bounds;
+  const allDisplays = screen.getAllDisplays();
 
-  // workArea.y already represents the top of the usable area (accounts for top-positioned taskbar)
-  // workArea.y + workArea.height is the bottom of the usable area
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const displays = allDisplays.map((d) => {
+    minX = Math.min(minX, d.bounds.x);
+    minY = Math.min(minY, d.bounds.y);
+    maxX = Math.max(maxX, d.bounds.x + d.bounds.width);
+    maxY = Math.max(maxY, d.bounds.y + d.bounds.height);
+    return {
+      x: d.bounds.x,
+      y: d.bounds.y,
+      width: d.bounds.width,
+      height: d.bounds.height,
+      workAreaX: d.workArea.x,
+      workAreaY: d.workArea.y,
+      workAreaWidth: d.workArea.width,
+      workAreaHeight: d.workArea.height,
+      // bottom of work area = top of taskbar area (for bottom taskbar)
+      bottomY: d.workArea.y + d.workArea.height,
+    };
+  });
+
+  const virtualX = minX;
+  const virtualY = minY;
+  const virtualWidth = maxX - minX;
+  const virtualHeight = maxY - minY;
+
+  // For backward compatibility, also return the primary display info
+  const primary = screen.getPrimaryDisplay();
   return {
-    dockX: bounds.x,
-    dockWidth: bounds.width,
-    dockTopY: workArea.y + workArea.height, // bottom of work area = taskbar top Y for bottom taskbar
-    screenWidth: bounds.width
+    dockX: primary.bounds.x,
+    dockWidth: primary.bounds.width,
+    dockTopY: primary.workArea.y + primary.workArea.height,
+    screenWidth: primary.bounds.width,
+    // Multi-monitor support
+    virtualX,
+    virtualY,
+    virtualWidth,
+    virtualHeight,
+    displays,
   };
 });
 
@@ -189,44 +272,42 @@ ipcMain.on('open-external', (_event, url) => {
   shell.openExternal(url);
 });
 
+// 同步角色可见性到托盘菜单勾选状态（renderer → tray）
+ipcMain.on('set-tray-visibility', (_event, name: string, visible: boolean) => {
+  setTrayVisibilityChecked(name, visible);
+});
+
 // Image picker: selects files, reads them, returns base64 data
 ipcMain.handle('select-image', async () => {
-  // The mainWindow is an alwaysOnTop toolbar window that covers the entire screen.
-  // We must temporarily lower its Z-level so the dialog is visible.
-  if (!mainWindow || mainWindow.isDestroyed()) return [];
+  const wins = rendererWindows.filter(w => !w.isDestroyed());
+  if (wins.length === 0) return [];
 
-  // Lower the window Z-level so the dialog can appear on top
-  mainWindow.setAlwaysOnTop(false);
-  // Add small delay to ensure Windows processes the Z-order change
+  suppressKeepOnTop = true;
+  for (const win of wins) win.setAlwaysOnTop(false);
   await new Promise(resolve => setTimeout(resolve, 100));
-
-  // Check if window was destroyed while waiting
-  if (!mainWindow || mainWindow.isDestroyed()) return [];
 
   const result = await dialog.showOpenDialog({
     properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }],
   });
 
-  // Restore window Z-order
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setAlwaysOnTop(true, 'screen-saver');
+  for (const win of wins) {
+    if (!win.isDestroyed()) win.setAlwaysOnTop(true, 'screen-saver');
   }
+  suppressKeepOnTop = false;
 
   if (result.canceled || result.filePaths.length === 0) return [];
 
   const images: Array<{ mimeType: string; data: string }> = [];
-  const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+  const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
   for (const filePath of result.filePaths) {
     try {
-      // Check file size before reading
       const stats = await fs.promises.stat(filePath);
       if (stats.size > MAX_FILE_SIZE) {
         console.error(`[select-image] File too large: ${filePath} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
         continue;
       }
-
       const ext = filePath.split('.').pop()?.toLowerCase();
       const mimeTypeMap: Record<string, string> = {
         png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
@@ -245,25 +326,28 @@ ipcMain.handle('select-image', async () => {
 
 // Export: save chat history to a markdown file
 ipcMain.handle('export-chat', async (_event, filename: string, content: string) => {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const wins = rendererWindows.filter(w => !w.isDestroyed());
+  if (wins.length === 0) return false;
 
-  // Lower the window Z-level so the dialog can appear on top
-  mainWindow.setAlwaysOnTop(false);
-  // Add small delay to ensure Windows processes the Z-order change
+  suppressKeepOnTop = true;
+  for (const win of wins) win.setAlwaysOnTop(false);
   await new Promise(resolve => setTimeout(resolve, 100));
 
-  // Check if window was destroyed while waiting
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const aliveWins = wins.filter(w => !w.isDestroyed());
+  if (aliveWins.length === 0) {
+    suppressKeepOnTop = false;
+    return false;
+  }
 
   const result = await dialog.showSaveDialog({
     defaultPath: filename,
     filters: [{ name: 'Markdown', extensions: ['md'] }],
   });
 
-  // Restore window Z-order
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setAlwaysOnTop(true, 'screen-saver');
+  for (const win of wins) {
+    if (!win.isDestroyed()) win.setAlwaysOnTop(true, 'screen-saver');
   }
+  suppressKeepOnTop = false;
 
   if (result.canceled || !result.filePath) return false;
 

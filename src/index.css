@@ -12,10 +12,20 @@ html, body, #root {
   color: var(--text-color, #ccd0d6);
 }
 
+/* Lock the page so wheel scrolling can never shift the character away from
+   the taskbar. The character is positioned relative to window.innerHeight,
+   so any page scroll would otherwise create a gap above the taskbar. */
+html, body {
+  overflow: hidden;
+  overscroll-behavior: none;
+  position: fixed;
+  inset: 0;
+}
+
 /* Theme Design System */
 :root, .theme-neon {
   --bg-color: rgba(18, 18, 24, 0.95);
-  --bg-blur: 4px;
+  --bg-filter: blur(4px);
   --border-color: rgba(255, 255, 255, 0.12);
   --title-bg: rgba(30, 30, 40, 0.9);
   --text-color: #abb2bf;
@@ -29,14 +39,14 @@ html, body, #root {
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
   --chat-bubble-bg: rgba(86, 182, 194, 0.1);
   --chat-bubble-text: rgba(165, 220, 235, 0.95);
-  --chat-bubble-radius: 14px 14px 4px 14px;
+  --chat-bubble-radius: 14px;
   --chat-bubble-border: none;
   --chat-bubble-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
 .theme-corporate {
   --bg-color: rgba(245, 247, 250, 0.98);
-  --bg-blur: 4px;
+  --bg-filter: blur(4px);
   --border-color: rgba(0, 0, 0, 0.1);
   --title-bg: rgba(230, 235, 245, 0.9);
   --text-color: #4a4a4a;
@@ -50,14 +60,14 @@ html, body, #root {
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
   --chat-bubble-bg: rgba(41, 128, 185, 0.08);
   --chat-bubble-text: rgba(44, 62, 80, 0.95);
-  --chat-bubble-radius: 18px;
+  --chat-bubble-radius: 14px;
   --chat-bubble-border: none;
   --chat-bubble-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .theme-toxic {
   --bg-color: rgba(0, 10, 0, 0.96);
-  --bg-blur: 2px;
+  --bg-filter: blur(2px);
   --border-color: #00ff41;
   --title-bg: #002200;
   --text-color: #00ff41;
@@ -69,6 +79,53 @@ html, body, #root {
   --code-text: #00ff41;
   --link-color: #ffffff;
   --shadow: 0 0 20px rgba(0, 255, 65, 0.3);
+}
+
+.theme-glass {
+  --bg-color: rgba(245, 245, 245, 0.863);
+  --bg-filter: blur(200px) saturate(200%);
+  --border-color: rgba(255, 255, 255, 0.4);
+  --title-bg: rgba(247, 247, 247, 0.893);
+  --text-color: #0f0f10;
+  --text-dim: #4a4a52;
+  --accent-color: #007aff;
+  --user-color: #34c759;
+  --error-color: #ff3b30;
+  --code-bg: rgba(0, 0, 0, 0.07);
+  --code-text: #af52de;
+  --link-color: #007aff;
+  --shadow:
+    0 32px 80px rgba(0, 0, 0, 0.28),
+    0 12px 36px rgba(0, 0, 0, 0.18),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.06),
+    inset 1px 0 0 rgba(255, 255, 255, 0.65),
+    inset -1px 0 0 rgba(0, 0, 0, 0.03);
+  --chat-bubble-bg: rgba(255, 255, 255, 0.6);
+  --chat-bubble-text: #0f0f10;
+  --chat-bubble-radius: 18px;
+  --chat-bubble-border: 1px solid rgba(255, 255, 255, 0.6);
+  --chat-bubble-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  --panel-bg: rgba(255, 255, 255, 0.5);
+  --panel-border: rgba(255, 255, 255, 0.35);
+  --panel-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.18),
+    0 4px 12px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.04);
+  --slider-bg: rgba(255, 255, 255, 0.98);
+  --slider-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+  --btn-hover-bg: rgba(255, 255, 255, 0.55);
+  --btn-hover-shadow: 0 1px 3px rgba(0, 0, 0, 0.171), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.theme-glass ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 6px;
+}
+.theme-glass ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.8);
 }
 
 kbd {

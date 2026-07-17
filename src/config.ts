@@ -11,21 +11,13 @@ export type Phase = 'idle' | 'start' | 'loop' | 'end';
 export const BASE_STEP = 0.8;            // pixels/frame at full speed
 export const FRAME_DURATION_MS = 50;   // sprite frame advances every 50ms
 
-/* ── Movement boundaries (0–1 fraction of dock width) ── */
-export const PROGRESS_MIN = 0.005;
-export const PROGRESS_MAX = 0.995;
-export const SAFE_BOUNDARY_MIN = 0.01;
-export const SAFE_BOUNDARY_MAX = 0.99;
-export const IDLE_BOUNDARY_MIN = 0.02;
-export const IDLE_BOUNDARY_MAX = 0.98;
-
-/* ── Walk target proximity ── */
-export const TARGET_PROXIMITY = 0.002;
+/* ── Movement boundaries (pixel-based, for multi-monitor support) ── */
+export const TARGET_PROXIMITY_PX = 2;
 
 /* ── Walk target planning ── */
-export const WALK_DIST_MIN_FRAC = 0.1;   // 10% of screen
-export const WALK_DIST_MAX_FRAC = 0.2;   // 30% of screen
-export const WALK_DIST_THRESHOLD = 0.01; // minimum displacement to attempt walk
+export const WALK_DIST_MIN_PX = 200;
+export const WALK_DIST_MAX_PX = 500;
+export const WALK_DIST_THRESHOLD_PX = 50;
 export const LOOP_FRAMES_MIN = 3;        // min loop cycles
 export const LOOP_FRAMES_MAX = 12;       // max loop cycles
 
